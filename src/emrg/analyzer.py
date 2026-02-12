@@ -178,6 +178,14 @@ def _validate_circuit(qc: QuantumCircuit) -> list[str]:
             "Circuit has no measurements. Error mitigation requires "
             "measurement results -- consider adding qc.measure_all()."
         )
+    if qc.num_parameters > 0:
+        warns.append(
+            f"Circuit has {qc.num_parameters} unbound parameter(s). "
+            "Parameters must be bound before execution "
+            "(e.g. qc = qc.assign_parameters({...})). "
+            "EMRG will analyze the circuit structure, but the generated "
+            "code cannot run until all parameters are resolved."
+        )
     return warns
 
 

@@ -83,6 +83,19 @@ class TestValidation:
             features = analyze_circuit(no_measure_circuit)
         assert features.has_measurements is False
 
+    def test_warns_unbound_parameters(self, vqe_circuit: QuantumCircuit) -> None:
+        with pytest.warns(UserWarning, match="unbound parameter"):
+            features = analyze_circuit(vqe_circuit)
+        assert features.num_parameters == 16
+
+    def test_no_parameter_warning_for_bound_circuit(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        # Should NOT emit a parameter warning (only the no-warning case matters).
+        # If a parameter warning were emitted, this would fail.
+        features = analyze_circuit(bell_circuit)
+        assert features.num_parameters == 0
+
 
 # ---------------------------------------------------------------------------
 # Tests: feature extraction
@@ -150,26 +163,31 @@ class TestGHZCircuit:
 class TestVQECircuit:
     """Verify features for a parametric VQE-like ansatz."""
 
+    @pytest.mark.filterwarnings("ignore:Circuit has.*unbound parameter")
     def test_num_parameters(self, vqe_circuit: QuantumCircuit) -> None:
         f = analyze_circuit(vqe_circuit)
         # 2 layers * (4 + 4) RY params = 16
         assert f.num_parameters == 16
 
+    @pytest.mark.filterwarnings("ignore:Circuit has.*unbound parameter")
     def test_multi_qubit_count(self, vqe_circuit: QuantumCircuit) -> None:
         f = analyze_circuit(vqe_circuit)
         # 2 layers * 3 CX per layer = 6
         assert f.multi_qubit_gate_count == 6
 
+    @pytest.mark.filterwarnings("ignore:Circuit has.*unbound parameter")
     def test_single_qubit_count(self, vqe_circuit: QuantumCircuit) -> None:
         f = analyze_circuit(vqe_circuit)
         # 2 layers * 8 RY per layer = 16
         assert f.single_qubit_gate_count == 16
 
+    @pytest.mark.filterwarnings("ignore:Circuit has.*unbound parameter")
     def test_noise_category(self, vqe_circuit: QuantumCircuit) -> None:
         f = analyze_circuit(vqe_circuit)
         # 6*0.01 + 16*0.001 = 0.076 -> moderate
         assert f.noise_category == "moderate"
 
+    @pytest.mark.filterwarnings("ignore:Circuit has.*unbound parameter")
     def test_depth_reasonable(self, vqe_circuit: QuantumCircuit) -> None:
         f = analyze_circuit(vqe_circuit)
         assert f.depth >= 4  # at least a few layers deep

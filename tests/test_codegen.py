@@ -215,6 +215,45 @@ class TestHeader:
 
 
 # ---------------------------------------------------------------------------
+# Tests: parameter warning
+# ---------------------------------------------------------------------------
+
+
+class TestParameterWarning:
+    """Verify generated code warns about unbound parameters."""
+
+    def test_parametric_has_warning_block(
+        self, parametric_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_linear_recipe(), parametric_features)
+        assert "WARNING" in code
+        assert "unbound parameter" in code
+        assert "assign_parameters" in code
+
+    def test_non_parametric_no_warning(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_linear_recipe(), shallow_features)
+        assert "unbound parameter" not in code
+
+    def test_parametric_code_still_compiles(
+        self, parametric_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_linear_recipe(), parametric_features)
+        compile(code, "<emrg-param-warning>", "exec")
+
+    def test_parametric_explain_mode(
+        self, parametric_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(
+            _make_linear_recipe(), parametric_features, explain=True
+        )
+        assert "WARNING" in code
+        assert "assign_parameters" in code
+        assert "Rationale:" in code  # explain content still present
+
+
+# ---------------------------------------------------------------------------
 # Tests: explain mode
 # ---------------------------------------------------------------------------
 
@@ -416,6 +455,7 @@ class TestFullPipeline:
         assert "execute_with_zne" in code
         assert "Rationale:" in code
 
+    @pytest.mark.filterwarnings("ignore:Circuit has.*unbound parameter")
     def test_vqe_pipeline(self) -> None:
         """Moderate-depth VQE should get RichardsonFactory."""
         from qiskit.circuit import Parameter
@@ -437,3 +477,4 @@ class TestFullPipeline:
         compile(code, "<emrg-vqe-pipeline>", "exec")
         assert recipe.factory_name in code
         assert "execute_with_zne" in code
+        assert "assign_parameters" in code  # parameter warning present

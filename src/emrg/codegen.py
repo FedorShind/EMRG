@@ -104,6 +104,30 @@ def _render_factory(recipe: MitigationRecipe, explain: bool) -> str:
     return "\n".join(lines)
 
 
+def _render_parameter_warning(features: CircuitFeatures) -> str | None:
+    """Render a warning comment block when the circuit has unbound parameters.
+
+    Returns ``None`` if the circuit has no parameters (caller should skip).
+    """
+    if features.num_parameters == 0:
+        return None
+
+    return "\n".join(
+        [
+            "# " + "!" * 61,
+            f"# WARNING: Circuit has {features.num_parameters} unbound parameter(s).",
+            "# You must bind all parameters before execution, e.g.:",
+            "#",
+            "#     from numpy import pi",
+            "#     params = {p: pi / 4 for p in circuit.parameters}",
+            "#     bound_circuit = circuit.assign_parameters(params)",
+            "#",
+            "# Mitiq cannot execute a circuit with unbound parameters.",
+            "# " + "!" * 61,
+        ]
+    )
+
+
 def _render_executor(explain: bool) -> str:
     """Render the executor placeholder with a commented-out Aer example."""
     lines: list[str] = []
@@ -236,11 +260,21 @@ def generate_code(
         _render_imports(recipe),
         "",
         _render_factory(recipe, explain),
-        "",
-        _render_executor(explain),
-        "",
-        _render_execution(recipe, circuit_name, explain),
-        "",  # trailing newline
     ]
+
+    param_warning = _render_parameter_warning(features)
+    if param_warning is not None:
+        sections.append("")
+        sections.append(param_warning)
+
+    sections.extend(
+        [
+            "",
+            _render_executor(explain),
+            "",
+            _render_execution(recipe, circuit_name, explain),
+            "",  # trailing newline
+        ]
+    )
 
     return "\n".join(sections)
