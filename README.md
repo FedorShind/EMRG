@@ -1,22 +1,18 @@
 # EMRG
 
-**Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
+**Error Mitigation Recipe Generator** — Automatic quantum error mitigation for NISQ circuits.
 
 EMRG analyzes your quantum circuit and generates ready-to-run, explained [Mitiq](https://mitiq.readthedocs.io/)-powered error mitigation code. No manual tuning required.
 
-> **Status:** v0.1.0 -- MVP in active development.
+> **Status:** v0.1.0 — MVP. Actively developed, [grant-funded roadmap](#roadmap) ahead.
 
 ---
 
 ## Why EMRG?
 
-Noise limits every computation on today's hardware. Error mitigation techniques like **Zero-Noise Extrapolation (ZNE)** can boost fidelity 2--10x, but configuring them manually is tedious:
+Configuring error mitigation by hand is tedious. Which extrapolation factory? What scale factors for your circuit depth? How do you balance overhead vs. accuracy?
 
-- Which extrapolation factory? Linear, Richardson, Polynomial?
-- What scale factors for your circuit depth?
-- How do you balance overhead vs. accuracy?
-
-**EMRG handles this automatically.** Give it a circuit, get back optimized mitigation code with clear explanations of *why* each choice was made.
+It's hard to do for most people. EMRG does it for you: give it a circuit, get back optimized mitigation code with clear explanations of *why* each choice was made.
 
 ## How It Works
 
@@ -24,30 +20,30 @@ Noise limits every computation on today's hardware. Error mitigation techniques 
 Quantum Circuit --> [Analyze] --> [Heuristic Engine] --> [Code Generator] --> Mitigated Code
 ```
 
-1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file
-2. **Extract Features** -- Depth, gate counts, multi-qubit gate density, estimated noise factor
-3. **Apply Heuristics** -- Rule-based decision tree selects the best mitigation recipe
-4. **Generate Code** -- Output runnable Python with Mitiq imports, factory config, and inline rationale
+1. **Parse & Validate** — Load a Qiskit `QuantumCircuit` or QASM file
+2. **Extract Features** — Depth, gate counts, multi-qubit gate density, estimated noise factor
+3. **Apply Heuristics** — Rule-based decision tree selects the best mitigation recipe
+4. **Generate Code** — Output runnable Python with Mitiq imports, factory config, and inline rationale
 
 ### Heuristic Rules (v0.1)
 
 | Circuit Profile | Factory | Scale Factors | Rationale |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Depth < 20, low multi-qubit gates | `LinearFactory` | `[1.0, 1.5, 2.0]` | Conservative for shallow circuits |
-| Depth 20--50 | `RichardsonFactory` | `[1.0, 1.5, 2.0, 2.5]` | Better extrapolation for moderate noise |
-| Depth > 50 or high noise | `PolyFactory` (deg 2--3) | `[1.0, 1.5, 2.0, 2.5, 3.0]` | Handles non-linear noise scaling |
+| Depth 20–50 | `RichardsonFactory` | `[1.0, 1.5, 2.0, 2.5]` | Better extrapolation for moderate noise |
+| Depth > 50 or high noise | `PolyFactory` (deg 2–3) | `[1.0, 1.5, 2.0, 2.5, 3.0]` | Handles non-linear noise scaling |
 
 ## Quick Start
 
 ### Installation
 
-```bash
+```
 pip install emrg
 ```
 
 Or from source:
 
-```bash
+```
 git clone https://github.com/FedorShind/EMRG.git
 cd EMRG
 pip install -e ".[dev]"
@@ -98,7 +94,7 @@ result = generate_recipe(qc, explain=True)
 
 ```python
 # =============================================================
-# EMRG v0.1.0 -- Error Mitigation Recipe
+# EMRG v0.1.0 — Error Mitigation Recipe
 # Circuit: 2 qubits, depth 3, 1 multi-qubit gates
 # Noise estimate: 0.011 (low)
 # =============================================================
@@ -156,7 +152,7 @@ Real measurements from EMRG v0.1.0, collected automatically by [`benchmarks/run_
 EMRG relies on pure Qiskit introspection (no simulation), so `generate_recipe()` completes in sub-millisecond time even for large circuits. Median of 100 runs:
 
 | Circuit | Qubits | Depth | Gates | Multi-Q | Factory | Time | Memory |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | Bell state | 2 | 3 | 2 | 1 | `LinearFactory` | 0.033 ms | 3.8 KB |
 | GHZ-5 | 5 | 6 | 5 | 4 | `LinearFactory` | 0.047 ms | 3.8 KB |
 | GHZ-10 | 10 | 11 | 10 | 9 | `LinearFactory` | 0.069 ms | 3.8 KB |
@@ -173,7 +169,7 @@ A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe 
 To validate that EMRG selects effective mitigation parameters, we ran ZNE end-to-end on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate depolarizing noise) and compared the `<Z>` expectation value on qubit 0:
 
 | Circuit | Qubits | Depth | Noise | Factory | Ideal | Noisy | Mitigated | Error Reduction |
-|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | X-flip, 2q | 2 | 3 | p=0.01 | `LinearFactory` | -1.0000 | -0.9761 | -1.0003 | **77x** |
 | X-flip, 3q | 3 | 4 | p=0.01 | `LinearFactory` | -1.0000 | -0.9761 | -1.0003 | **77x** |
 | X-flip, 2q | 2 | 3 | p=0.05 | `LinearFactory` | -1.0000 | -0.8836 | -0.9906 | **12x** |
@@ -193,37 +189,49 @@ python benchmarks/run_benchmark.py
 
 ## Roadmap
 
-### Phase 1 -- MVP (current)
-- [x] Project structure and packaging
-- [x] Circuit analyzer (feature extraction)
-- [x] Heuristic engine (ZNE: Linear + Richardson + Poly)
-- [x] Code generator (template-based)
-- [x] CLI with `generate` and `analyze` commands
-- [x] Public Python API (`generate_recipe()`)
-- [x] Example circuits (Python + QASM) and documentation
-- [x] 144 tests, 98% coverage, zero lint warnings
+### Phase 1 — MVP ✅
 
-### Phase 2 -- Unitary Fund Grant Target
-- [ ] Probabilistic Error Cancellation (PEC) support
-- [ ] Layerwise Richardson integration
-- [ ] `--preview` mode (noisy simulation + fidelity plots)
-- [ ] Benchmarks and tutorials
+Everything needed to go from circuit to mitigation recipe in one command:
 
-### Phase 3 -- Community
-- [ ] Cirq and PennyLane input support
-- [ ] Configurable heuristics file
-- [ ] Web/Colab interface
+* Circuit analyzer with feature extraction (depth, gate counts, multi-qubit density, noise estimate)
+* Heuristic engine covering ZNE with Linear, Richardson, and Polynomial factories
+* Template-based code generator with inline rationale
+* CLI (`emrg generate`, `emrg analyze`) and public Python API (`generate_recipe()`)
+* Example circuits in both Python and QASM
+* 144 tests, 98% coverage, zero lint warnings
+
+### Phase 2 — More techniques, better validation
+
+Expand beyond ZNE so EMRG can recommend the right technique, not just the right ZNE settings:
+
+* **Probabilistic Error Cancellation (PEC)** — for circuits where ZNE hits its limits
+* **Layerwise Richardson** — finer-grained extrapolation for deep circuits
+* **`--preview` mode** — run a noisy simulation and show before/after fidelity plots so you can see the effect before committing to hardware
+* **Real hardware benchmarks** — validate recipes on IBM Quantum devices, not just simulators
+* **Expanded tutorials** — walkthroughs for common use cases (VQE, QAOA, random circuits)
+
+### Phase 3 — Multi-framework and community
+
+Make EMRG useful regardless of which framework you use:
+
+* **Cirq and PennyLane input support** — not just Qiskit
+* **Configurable heuristics** — let users tweak or override the decision rules via a config file
+* **Web/Colab interface** — try EMRG without installing anything
 
 ## Tech Stack
 
-- **Python 3.10+**
-- **Qiskit** >= 1.0 -- Circuit representation and simulation
-- **Mitiq** >= 0.48 -- Error mitigation primitives
-- **Click** >= 8.0 -- CLI framework
+* **Python 3.10+**
+* **Qiskit** >= 1.0 — Circuit representation and introspection
+* **Mitiq** >= 0.48 — Error mitigation primitives
+* **Click** >= 8.0 — CLI framework
+
+## Contributing
+
+EMRG is open source and contributions are welcome. If you have ideas, find bugs, or want to add support for new mitigation techniques, open an issue or PR.
 
 ## License
 
-[MIT](LICENSE) -- Free for academic and commercial use.
+[MIT](LICENSE) — Free for academic and commercial use.
 
 ## Acknowledgments
 
