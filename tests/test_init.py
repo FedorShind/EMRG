@@ -116,7 +116,10 @@ class TestPublicImports:
     """Verify all __all__ names are importable."""
 
     def test_version(self) -> None:
-        assert emrg.__version__ == "0.1.0"
+        # Check version is a valid semver string, not a hardcoded value
+        import re
+
+        assert re.match(r"\d+\.\d+\.\d+", emrg.__version__)
 
     def test_all_names_importable(self) -> None:
         for name in emrg.__all__:
