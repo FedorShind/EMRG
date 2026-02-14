@@ -31,6 +31,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+nul
 
 # Environment variables
 .env
