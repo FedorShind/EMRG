@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml/badge.svg)](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml)
 
-##**Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
+## **Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
 
 EMRG analyzes your quantum circuit and generates ready-to-run, explained [Mitiq](https://mitiq.readthedocs.io/)-powered error mitigation code. No manual tuning required.
 
