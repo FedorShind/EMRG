@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from emrg import __version__
 from emrg.cli import main
 
 # ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@ class TestTopLevel:
     def test_version(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "emrg, version 0.1.0" in result.output
+        assert f"emrg, version {__version__}" in result.output
 
     def test_help(self, runner: CliRunner) -> None:
         result = runner.invoke(main, [])

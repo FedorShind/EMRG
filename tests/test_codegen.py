@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from qiskit import QuantumCircuit
 
+from emrg import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
@@ -184,7 +185,7 @@ class TestHeader:
 
     def test_contains_version(self, shallow_features: CircuitFeatures) -> None:
         code = generate_code(_make_linear_recipe(), shallow_features)
-        assert "EMRG v0.1.0" in code
+        assert f"EMRG v{__version__}" in code
 
     def test_contains_circuit_stats(self, shallow_features: CircuitFeatures) -> None:
         code = generate_code(_make_linear_recipe(), shallow_features)
@@ -230,9 +231,7 @@ class TestParameterWarning:
         assert "unbound parameter" in code
         assert "assign_parameters" in code
 
-    def test_non_parametric_no_warning(
-        self, shallow_features: CircuitFeatures
-    ) -> None:
+    def test_non_parametric_no_warning(self, shallow_features: CircuitFeatures) -> None:
         code = generate_code(_make_linear_recipe(), shallow_features)
         assert "unbound parameter" not in code
 
@@ -245,9 +244,7 @@ class TestParameterWarning:
     def test_parametric_explain_mode(
         self, parametric_features: CircuitFeatures
     ) -> None:
-        code = generate_code(
-            _make_linear_recipe(), parametric_features, explain=True
-        )
+        code = generate_code(_make_linear_recipe(), parametric_features, explain=True)
         assert "WARNING" in code
         assert "assign_parameters" in code
         assert "Rationale:" in code  # explain content still present
@@ -449,7 +446,7 @@ class TestFullPipeline:
         compile(code, "<emrg-pipeline>", "exec")
 
         # Must contain expected elements
-        assert "EMRG v0.1.0" in code
+        assert f"EMRG v{__version__}" in code
         assert "2 qubits" in code
         assert recipe.factory_name in code
         assert "execute_with_zne" in code
