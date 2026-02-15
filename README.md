@@ -235,7 +235,7 @@ Make EMRG useful regardless of which framework you use:
 
 ## Contributing
 
-EMRG is open source and contributions are welcome. If you have ideas, find bugs, or want to add support for new mitigation techniques, open an issue or PR.
+EMRG is open source and contributions are welcome. If you have ideas, find bugs, or want to add support for new mitigation techniques, open an issue or PR. **BTC address:** *bc1qaxdd227afjp3ym5t7jn2atmacjqx3auh9urwfu*
 
 ## License
 
@@ -243,5 +243,9 @@ EMRG is open source and contributions are welcome. If you have ideas, find bugs,
 
 ## Acknowledgments
 
-Built on [Mitiq](https://mitiq.readthedocs.io/) by [Unitary Fund](https://unitary.fund/).
+Built on [Mitiq](https://mitiq.readthedocs.io/) by [Unitary Foundation](https://unitary.foundation).
 Inspired by the need to make quantum error mitigation accessible to everyone working with NISQ hardware.
+
+### Side note
+
+If you're stuck or don't understand something, I strongly advise you to ask AI for help. Cheers!
