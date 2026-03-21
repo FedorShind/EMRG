@@ -7,10 +7,15 @@ import pytest
 from emrg.analyzer import CircuitFeatures
 from emrg.heuristics import (
     DEFAULT_RULES,
+    PEC_DEFAULT_NOISE_LEVEL,
+    PEC_MAX_SAMPLES,
+    PEC_MIN_SAMPLES,
     MitigationRecipe,
+    _compute_pec_samples,
     _is_deep_or_high_noise,
     _is_moderate_depth,
     _is_shallow,
+    _should_use_pec,
     recommend,
 )
 from tests._helpers import make_features as _make_features
@@ -376,3 +381,238 @@ class TestDefaultRules:
         for predicate, builder in DEFAULT_RULES:
             assert callable(predicate)
             assert callable(builder)
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC predicate
+# ---------------------------------------------------------------------------
+
+
+class TestPECPredicate:
+    """Verify _should_use_pec matches the correct conditions."""
+
+    def test_eligible_circuit(self) -> None:
+        f = _make_features(
+            depth=20,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        assert _should_use_pec(f) is True
+
+    def test_rejects_deep_circuit(self) -> None:
+        f = _make_features(
+            depth=31,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        assert _should_use_pec(f) is False
+
+    def test_rejects_no_noise_model(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=False,
+            pec_overhead_estimate=50.0,
+        )
+        assert _should_use_pec(f) is False
+
+    def test_rejects_high_overhead(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=1000.0,
+        )
+        assert _should_use_pec(f) is False
+
+    def test_boundary_depth_30_included(self) -> None:
+        f = _make_features(
+            depth=30,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        assert _should_use_pec(f) is True
+
+    def test_boundary_depth_31_excluded(self) -> None:
+        f = _make_features(
+            depth=31,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        assert _should_use_pec(f) is False
+
+    def test_boundary_overhead_999_included(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=999.9,
+        )
+        assert _should_use_pec(f) is True
+
+    def test_boundary_overhead_1000_excluded(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=1000.0,
+        )
+        assert _should_use_pec(f) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC recommend()
+# ---------------------------------------------------------------------------
+
+
+class TestPECRecommend:
+    """Verify recommend() selects PEC when appropriate."""
+
+    def test_auto_selects_pec_for_eligible(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        assert recipe.technique == "pec"
+
+    def test_auto_selects_zne_for_ineligible(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=False,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        assert recipe.technique == "zne"
+
+    def test_technique_pec_forces_pec(self) -> None:
+        """technique='pec' forces PEC even when conditions are not met."""
+        f = _make_features(
+            depth=80,
+            noise_model_available=False,
+            pec_overhead_estimate=5000.0,
+            noise_category="high",
+        )
+        recipe = recommend(f, technique="pec")
+        assert recipe.technique == "pec"
+
+    def test_technique_zne_forces_zne(self) -> None:
+        """technique='zne' forces ZNE even when PEC conditions are met."""
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f, technique="zne")
+        assert recipe.technique == "zne"
+
+    def test_auto_none_is_default(self) -> None:
+        """technique=None is the default auto-detection behavior."""
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe_auto = recommend(f, technique=None)
+        recipe_default = recommend(f)
+        assert recipe_auto.technique == recipe_default.technique == "pec"
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC recipe content
+# ---------------------------------------------------------------------------
+
+
+class TestPECRecipeContent:
+    """Verify PEC recipe fields are well-formed."""
+
+    def test_technique_is_pec(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        assert recipe.technique == "pec"
+
+    def test_factory_name_empty(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        assert recipe.factory_name == ""
+
+    def test_scale_factors_empty(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        assert recipe.scale_factors == ()
+
+    def test_factory_kwargs_has_pec_config(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        assert "num_samples" in recipe.factory_kwargs
+        assert "noise_level" in recipe.factory_kwargs
+        assert recipe.factory_kwargs["noise_level"] == PEC_DEFAULT_NOISE_LEVEL
+
+    def test_num_samples_in_range(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        samples = recipe.factory_kwargs["num_samples"]
+        assert PEC_MIN_SAMPLES <= samples <= PEC_MAX_SAMPLES
+
+    def test_rationale_mentions_pec(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        all_text = " ".join(recipe.rationale)
+        assert "PEC" in all_text
+
+    def test_rationale_mentions_temme(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f)
+        all_text = " ".join(recipe.rationale)
+        assert "Temme" in all_text
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC sample computation
+# ---------------------------------------------------------------------------
+
+
+class TestPECSamples:
+    """Verify _compute_pec_samples clamping behavior."""
+
+    def test_low_overhead_clamps_to_min(self) -> None:
+        assert _compute_pec_samples(10.0) == PEC_MIN_SAMPLES
+
+    def test_high_overhead_clamps_to_max(self) -> None:
+        assert _compute_pec_samples(500.0) == PEC_MAX_SAMPLES
+
+    def test_mid_range_overhead(self) -> None:
+        assert _compute_pec_samples(150.0) == 300
+
+    def test_exact_boundary_min(self) -> None:
+        # overhead * 2 == 100 -> exactly PEC_MIN_SAMPLES
+        assert _compute_pec_samples(50.0) == PEC_MIN_SAMPLES
+
+    def test_exact_boundary_max(self) -> None:
+        # overhead * 2 == 500 -> exactly PEC_MAX_SAMPLES
+        assert _compute_pec_samples(250.0) == PEC_MAX_SAMPLES

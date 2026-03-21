@@ -45,6 +45,11 @@ __all__ = [
     "DEPTH_DEEP_THRESHOLD",
     "DEPTH_MODERATE_THRESHOLD",
     "MULTI_QUBIT_GATE_SHALLOW_MAX",
+    "PEC_MAX_DEPTH",
+    "PEC_MAX_OVERHEAD",
+    "PEC_DEFAULT_NOISE_LEVEL",
+    "PEC_MIN_SAMPLES",
+    "PEC_MAX_SAMPLES",
 ]
 
 # ---------------------------------------------------------------------------
@@ -59,6 +64,21 @@ DEPTH_MODERATE_THRESHOLD: int = 20
 
 #: Shallow circuits must have fewer multi-qubit gates than this.
 MULTI_QUBIT_GATE_SHALLOW_MAX: int = 50
+
+#: Maximum circuit depth for PEC to be considered.
+PEC_MAX_DEPTH: int = 30
+
+#: PEC is only practical when the estimated overhead is below this.
+PEC_MAX_OVERHEAD: float = 1000.0
+
+#: Default depolarizing noise level assumed for PEC representations.
+PEC_DEFAULT_NOISE_LEVEL: float = 0.01
+
+#: Minimum number of PEC samples to request.
+PEC_MIN_SAMPLES: int = 100
+
+#: Maximum number of PEC samples to request.
+PEC_MAX_SAMPLES: int = 500
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -121,7 +141,63 @@ Rule = tuple[
 
 
 # ---------------------------------------------------------------------------
-# Predicates
+# PEC helpers
+# ---------------------------------------------------------------------------
+
+
+def _should_use_pec(features: CircuitFeatures) -> bool:
+    """Return ``True`` when PEC is viable for the given circuit.
+
+    PEC is recommended when **all** of:
+    * depth <= ``PEC_MAX_DEPTH``
+    * ``noise_model_available`` is ``True``
+    * ``pec_overhead_estimate`` < ``PEC_MAX_OVERHEAD``
+    """
+    return (
+        features.depth <= PEC_MAX_DEPTH
+        and features.noise_model_available
+        and features.pec_overhead_estimate < PEC_MAX_OVERHEAD
+    )
+
+
+def _compute_pec_samples(overhead: float) -> int:
+    """Derive the number of PEC samples from the overhead estimate.
+
+    The result is clamped between ``PEC_MIN_SAMPLES`` and ``PEC_MAX_SAMPLES``.
+    """
+    return max(PEC_MIN_SAMPLES, min(PEC_MAX_SAMPLES, int(overhead * 2)))
+
+
+def _build_pec_recipe(features: CircuitFeatures) -> MitigationRecipe:
+    """Build a PEC recipe for shallow circuits with an available noise model."""
+    num_samples = _compute_pec_samples(features.pec_overhead_estimate)
+    return MitigationRecipe(
+        technique="pec",
+        factory_name="",
+        scale_factors=(),
+        factory_kwargs=_freeze_kwargs({
+            "num_samples": num_samples,
+            "noise_level": PEC_DEFAULT_NOISE_LEVEL,
+        }),
+        scaling_method="",
+        rationale=(
+            f"Circuit depth ({features.depth}) <= {PEC_MAX_DEPTH} with "
+            f"noise model available and PEC overhead "
+            f"({features.pec_overhead_estimate:.1f}) < {PEC_MAX_OVERHEAD:.0f}.",
+            "PEC provides unbiased error mitigation by probabilistically "
+            "cancelling noise using quasi-probability representations "
+            "(Temme et al., PRL 119, 180509, 2017).",
+            f"Using {num_samples} samples (derived from overhead estimate).",
+            "PEC is preferred over ZNE when a noise model is available "
+            "and the sampling overhead is manageable.",
+        ),
+        noise_category=features.noise_category,
+        estimated_overhead=features.pec_overhead_estimate,
+    )
+
+
+# ---------------------------------------------------------------------------
+# ZNE predicates
 # ---------------------------------------------------------------------------
 
 
@@ -269,12 +345,15 @@ def recommend(
     features: CircuitFeatures,
     *,
     rules: Sequence[Rule] | None = None,
+    technique: str | None = None,
 ) -> MitigationRecipe:
     """Select the optimal error mitigation recipe for a circuit.
 
-    Evaluates *rules* in order and returns the recipe from the first
-    matching predicate.  Falls back to a conservative LinearFactory
-    if no rule matches.
+    When *technique* is ``None`` (the default), the engine first checks
+    whether PEC is viable (shallow circuit, noise model available, low
+    overhead).  If so, a PEC recipe is returned.  Otherwise, *rules* are
+    evaluated in order and the first matching predicate wins.  A
+    conservative LinearFactory fallback is used if no rule matches.
 
     Parameters
     ----------
@@ -282,6 +361,9 @@ def recommend(
         Circuit analysis output from :func:`~emrg.analyzer.analyze_circuit`.
     rules:
         Optional custom rule list.  Defaults to :data:`DEFAULT_RULES`.
+    technique:
+        Force a specific technique: ``"pec"`` or ``"zne"``.  When
+        ``None``, the engine auto-selects.
 
     Returns
     -------
@@ -302,6 +384,15 @@ def recommend(
     >>> recipe.factory_name
     'LinearFactory'
     """
+    # --- technique override --------------------------------------------------
+    if technique == "pec":
+        return _build_pec_recipe(features)
+
+    # --- auto-select: try PEC first ------------------------------------------
+    if technique is None and _should_use_pec(features):
+        return _build_pec_recipe(features)
+
+    # --- ZNE rule chain ------------------------------------------------------
     if rules is None:
         active_rules = DEFAULT_RULES
     else:
