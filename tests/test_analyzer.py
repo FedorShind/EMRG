@@ -287,3 +287,53 @@ class TestEdgeCases:
         f = analyze_circuit(qc)
         assert f.multi_qubit_gate_count == 3
         assert f.single_qubit_gate_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC overhead estimation
+# ---------------------------------------------------------------------------
+
+
+class TestPECOverhead:
+    """Verify PEC overhead estimation and noise_model_available field."""
+
+    def test_pec_overhead_bell(self, bell_circuit: QuantumCircuit) -> None:
+        """Bell circuit: exp(2 * 0.011 * 1) ≈ 1.022."""
+        import math
+
+        f = analyze_circuit(bell_circuit)
+        expected = math.exp(2 * 0.011 * 1)
+        assert f.pec_overhead_estimate == pytest.approx(expected, abs=1e-4)
+
+    def test_pec_overhead_high_noise(self) -> None:
+        """Many multi-qubit gates produce large PEC overhead."""
+        import math
+
+        qc = QuantumCircuit(4, 4)
+        for _ in range(30):
+            qc.cx(0, 1)
+        qc.measure(range(4), range(4))
+        f = analyze_circuit(qc)
+        # noise_factor = 30 * 0.01 = 0.30
+        expected = math.exp(2 * 0.30 * 30)
+        assert f.pec_overhead_estimate == pytest.approx(expected, rel=1e-4)
+        assert f.pec_overhead_estimate > 1000  # PEC impractical
+
+    def test_pec_overhead_is_at_least_one(self, bell_circuit: QuantumCircuit) -> None:
+        """PEC overhead is always >= 1.0 (exp of non-negative)."""
+        f = analyze_circuit(bell_circuit)
+        assert f.pec_overhead_estimate >= 1.0
+
+    def test_noise_model_available_default_false(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        """Default noise_model_available is False."""
+        f = analyze_circuit(bell_circuit)
+        assert f.noise_model_available is False
+
+    def test_noise_model_available_explicit_true(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        """Can explicitly set noise_model_available=True."""
+        f = analyze_circuit(bell_circuit, noise_model_available=True)
+        assert f.noise_model_available is True

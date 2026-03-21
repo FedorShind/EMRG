@@ -20,6 +20,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import math
 import warnings
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -38,6 +39,7 @@ __all__ = [
     "DEFAULT_SINGLE_QUBIT_ERROR_RATE",
     "NOISE_THRESHOLD_LOW",
     "NOISE_THRESHOLD_MODERATE",
+    "PEC_OVERHEAD_NOISE_MULTIPLIER",
 ]
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,10 @@ NOISE_THRESHOLD_LOW: float = 0.05
 #: at or above this threshold is "high".
 NOISE_THRESHOLD_MODERATE: float = 0.20
 
+#: Multiplier used in the PEC overhead formula:
+#: ``exp(PEC_OVERHEAD_NOISE_MULTIPLIER * noise_factor * multi_qubit_gate_count)``.
+PEC_OVERHEAD_NOISE_MULTIPLIER: float = 2.0
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -122,6 +128,13 @@ class CircuitFeatures:
               + single_qubit_gate_count * single_qubit_error_rate``).
         noise_category: Human-readable category: ``"low"``, ``"moderate"``,
             or ``"high"``.
+        noise_model_available: Whether a noise model is available for PEC.
+            Defaults to ``False``; set to ``True`` when a depolarizing (or
+            other) noise model can be supplied so the heuristic engine may
+            consider Probabilistic Error Cancellation.
+        pec_overhead_estimate: Approximate PEC sampling overhead computed as
+            ``exp(2 * noise_factor * multi_qubit_gate_count)``.  Values much
+            larger than ~1000 make PEC impractical.
     """
 
     num_qubits: int
@@ -134,6 +147,8 @@ class CircuitFeatures:
     has_measurements: bool = False
     estimated_noise_factor: float = 0.0
     noise_category: str = "low"
+    noise_model_available: bool = False
+    pec_overhead_estimate: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +240,21 @@ def _estimate_noise(
     )
 
 
+def _estimate_pec_overhead(
+    noise_factor: float,
+    multi_qubit_gate_count: int,
+) -> float:
+    """Return the approximate PEC sampling overhead.
+
+    The formula ``exp(2 * noise_factor * multi_qubit_gate_count)`` captures
+    the exponential cost that makes PEC impractical for large or very noisy
+    circuits.
+    """
+    return math.exp(
+        PEC_OVERHEAD_NOISE_MULTIPLIER * noise_factor * multi_qubit_gate_count
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -235,6 +265,7 @@ def analyze_circuit(
     *,
     multi_qubit_error_rate: float = DEFAULT_MULTI_QUBIT_ERROR_RATE,
     single_qubit_error_rate: float = DEFAULT_SINGLE_QUBIT_ERROR_RATE,
+    noise_model_available: bool = False,
 ) -> CircuitFeatures:
     """Analyze a Qiskit ``QuantumCircuit`` and extract mitigation-relevant features.
 
@@ -246,6 +277,10 @@ def analyze_circuit(
         Proxy error rate for multi-qubit gates (default 0.01).
     single_qubit_error_rate:
         Proxy error rate for single-qubit gates (default 0.001).
+    noise_model_available:
+        Whether a noise model is available for techniques like PEC
+        (default ``False``).  Set to ``True`` when a depolarizing or
+        tomographic noise model can be supplied.
 
     Returns
     -------
@@ -298,6 +333,8 @@ def analyze_circuit(
         single_qubit_error_rate=single_qubit_error_rate,
     )
 
+    pec_overhead = _estimate_pec_overhead(noise_factor, multi_qubit_gate_count)
+
     return CircuitFeatures(
         num_qubits=qc.num_qubits,
         depth=qc.depth(),
@@ -309,4 +346,6 @@ def analyze_circuit(
         has_measurements="measure" in ops,
         estimated_noise_factor=round(noise_factor, 6),
         noise_category=_classify_noise(noise_factor),
+        noise_model_available=noise_model_available,
+        pec_overhead_estimate=round(pec_overhead, 6),
     )
