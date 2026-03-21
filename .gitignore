@@ -43,6 +43,7 @@ nul
 # Project-local context (not for public repo)
 CLAUDE.md
 INFO.md
+.claude/
 
 # Benchmark results (machine-specific; regenerate locally)
 benchmarks/results.json

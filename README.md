@@ -208,24 +208,27 @@ python benchmarks/run_benchmark.py
 
 ## Roadmap
 
-### Phase 1 -- MVP + PEC (current)
+### Phase 1 -- MVP (complete)
 
 Everything needed to go from circuit to mitigation recipe in one command:
 
 - [x] Project structure and packaging
 - [x] Circuit analyzer (feature extraction)
 - [x] Heuristic engine (ZNE: Linear + Richardson + Poly)
-- [x] Probabilistic Error Cancellation (PEC) support
-- [x] Multi-technique selection (ZNE vs PEC)
-- [x] Code generator (template-based, ZNE + PEC)
+- [x] Code generator (template-based)
 - [x] CLI with `generate` and `analyze` commands
-- [x] `--technique` override and `--noise-model` flags
 - [x] Public Python API (`generate_recipe()`)
 - [x] Example circuits (Python + QASM) and documentation
+
+### Phase 2 -- More techniques, better validation (current)
+
+Expand beyond ZNE so EMRG can recommend the right technique, not just the right ZNE settings:
+
+- [x] Probabilistic Error Cancellation (PEC) support
+- [x] Multi-technique selection (ZNE vs PEC)
+- [x] PEC code generation template
+- [x] `--technique` override and `--noise-model` CLI flags
 - [x] 215+ tests, 99% coverage, zero lint warnings
-
-### Phase 2 -- Better validation and more techniques
-
 - [ ] Layerwise Richardson integration
 - [ ] `--preview` mode (noisy simulation + fidelity plots)
 - [ ] Real hardware benchmarks (IBM Quantum devices)
