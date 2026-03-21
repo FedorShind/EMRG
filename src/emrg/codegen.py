@@ -56,7 +56,12 @@ def _render_header(
         f"({features.noise_category})",
         "# =============================================================",
         "#",
-        f"# Recommendation: {recipe.factory_name} + {recipe.scaling_method}",
+        "# Recommendation: "
+        + (
+            "PEC (Probabilistic Error Cancellation)"
+            if recipe.technique == "pec"
+            else f"{recipe.factory_name} + {recipe.scaling_method}"
+        ),
     ]
 
     if explain and recipe.rationale:
@@ -194,6 +199,92 @@ def _render_execution(
 
 
 # ---------------------------------------------------------------------------
+# PEC renderers
+# ---------------------------------------------------------------------------
+
+
+def _render_pec_imports() -> str:
+    """Render PEC-specific import statements."""
+    return "\n".join(
+        [
+            "from mitiq.pec import execute_with_pec",
+            "from mitiq.pec.representations.depolarizing import (",
+            "    represent_operations_in_circuit_with_local_depolarizing_noise,",
+            ")",
+        ]
+    )
+
+
+def _render_pec_setup(
+    recipe: MitigationRecipe,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Render PEC noise level, sample count, and representation setup."""
+    noise_level = recipe.factory_kwargs.get("noise_level", 0.01)
+    num_samples = recipe.factory_kwargs.get("num_samples", 100)
+
+    lines: list[str] = []
+    if explain:
+        lines.append(
+            "# PEC uses quasi-probability representations of noisy gates"
+        )
+        lines.append(
+            "# to probabilistically cancel errors at the cost of extra samples."
+        )
+        lines.append(
+            f"# noise_level={noise_level} matches the expected hardware noise."
+        )
+        lines.append("")
+
+    lines.extend(
+        [
+            f"noise_level = {noise_level}",
+            f"num_samples = {num_samples}",
+            "",
+            "# Build quasi-probability representations for the circuit's operations.",
+            "# In practice, these should be derived from your noise model.",
+            "representations = "
+            "represent_operations_in_circuit_with_local_depolarizing_noise(",
+            f"    {circuit_name},",
+            "    noise_level=noise_level,",
+            ")",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_pec_execution(
+    recipe: MitigationRecipe,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Render the execute_with_pec call and result print."""
+    lines: list[str] = []
+
+    if explain:
+        lines.append("# Run probabilistic error cancellation.")
+        lines.append(
+            f"# Estimated overhead: ~{recipe.estimated_overhead:.1f}x "
+            "the base shot count."
+        )
+
+    lines.extend(
+        [
+            "mitigated_value = execute_with_pec(",
+            f"    {circuit_name},",
+            "    execute,",
+            "    representations=representations,",
+            "    num_samples=num_samples,",
+            ")",
+            "",
+            'print(f"Mitigated expectation value: {mitigated_value}")',
+        ]
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -254,6 +345,18 @@ def generate_code(
             f"circuit_name must be a valid Python identifier, got {circuit_name!r}."
         )
 
+    if recipe.technique == "pec":
+        return _generate_pec_code(recipe, features, circuit_name, explain)
+    return _generate_zne_code(recipe, features, circuit_name, explain)
+
+
+def _generate_zne_code(
+    recipe: MitigationRecipe,
+    features: CircuitFeatures,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Assemble sections for a ZNE recipe."""
     sections = [
         _render_header(recipe, features, explain),
         "",
@@ -273,6 +376,39 @@ def generate_code(
             _render_executor(explain),
             "",
             _render_execution(recipe, circuit_name, explain),
+            "",  # trailing newline
+        ]
+    )
+
+    return "\n".join(sections)
+
+
+def _generate_pec_code(
+    recipe: MitigationRecipe,
+    features: CircuitFeatures,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Assemble sections for a PEC recipe."""
+    sections = [
+        _render_header(recipe, features, explain),
+        "",
+        _render_pec_imports(),
+        "",
+        _render_pec_setup(recipe, circuit_name, explain),
+    ]
+
+    param_warning = _render_parameter_warning(features)
+    if param_warning is not None:
+        sections.append("")
+        sections.append(param_warning)
+
+    sections.extend(
+        [
+            "",
+            _render_executor(explain),
+            "",
+            _render_pec_execution(recipe, circuit_name, explain),
             "",  # trailing newline
         ]
     )

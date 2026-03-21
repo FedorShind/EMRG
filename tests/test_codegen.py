@@ -475,3 +475,174 @@ class TestFullPipeline:
         assert recipe.factory_name in code
         assert "execute_with_zne" in code
         assert "assign_parameters" in code  # parameter warning present
+
+
+# ---------------------------------------------------------------------------
+# Helpers: PEC recipe
+# ---------------------------------------------------------------------------
+
+
+def _make_pec_recipe() -> MitigationRecipe:
+    return MitigationRecipe(
+        technique="pec",
+        factory_name="",
+        scale_factors=(),
+        factory_kwargs={"num_samples": 200, "noise_level": 0.01},
+        scaling_method="",
+        rationale=(
+            "PEC selected for shallow circuit.",
+            "Temme et al., PRL 119, 180509, 2017.",
+        ),
+        noise_category="low",
+        estimated_overhead=50.0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC import correctness
+# ---------------------------------------------------------------------------
+
+
+class TestPECImports:
+    """Verify PEC code imports the right Mitiq classes."""
+
+    def test_imports_execute_with_pec(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "from mitiq.pec import execute_with_pec" in code
+
+    def test_imports_representations(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "represent_operations_in_circuit_with_local_depolarizing_noise" in code
+
+    def test_no_zne_imports(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "execute_with_zne" not in code
+        assert "from mitiq.zne" not in code
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC setup
+# ---------------------------------------------------------------------------
+
+
+class TestPECSetup:
+    """Verify PEC noise level and sample count appear in output."""
+
+    def test_noise_level_in_code(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "noise_level = 0.01" in code
+
+    def test_num_samples_in_code(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "num_samples = 200" in code
+
+    def test_representations_call(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "represent_operations_in_circuit_with_local_depolarizing_noise(" in code
+        assert "noise_level=noise_level," in code
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC execution
+# ---------------------------------------------------------------------------
+
+
+class TestPECExecution:
+    """Verify execute_with_pec call appears with correct args."""
+
+    def test_execute_with_pec_call(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "mitigated_value = execute_with_pec(" in code
+
+    def test_representations_arg(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "representations=representations," in code
+
+    def test_num_samples_arg(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "num_samples=num_samples," in code
+
+    def test_custom_circuit_name(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(
+            _make_pec_recipe(), shallow_features, circuit_name="qc"
+        )
+        assert "    qc," in code
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC syntax validity
+# ---------------------------------------------------------------------------
+
+
+class TestPECSyntaxValidity:
+    """Verify PEC-generated code compiles as valid Python."""
+
+    def test_full_compile(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        compile(code, "<emrg-pec-test>", "exec")
+
+    def test_full_compile_explain(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features, explain=True)
+        compile(code, "<emrg-pec-explain-test>", "exec")
+
+    def test_full_compile_parametric(
+        self, parametric_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_pec_recipe(), parametric_features)
+        compile(code, "<emrg-pec-param-test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC header
+# ---------------------------------------------------------------------------
+
+
+class TestPECHeader:
+    """Verify PEC header says PEC, not factory name."""
+
+    def test_pec_recommendation_line(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert "Recommendation: PEC (Probabilistic Error Cancellation)" in code
+
+    def test_no_factory_name_in_recommendation(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        # Should NOT show "Recommendation:  + " (empty factory + scaling)
+        assert "Recommendation:  + " not in code
+
+    def test_contains_version(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features)
+        assert f"EMRG v{__version__}" in code
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC explain mode
+# ---------------------------------------------------------------------------
+
+
+class TestPECExplainMode:
+    """Verify PEC explain mode includes appropriate comments."""
+
+    def test_explain_has_rationale(self, shallow_features: CircuitFeatures) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features, explain=True)
+        assert "Rationale:" in code
+        assert "Temme" in code
+
+    def test_explain_has_quasi_probability_comment(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features, explain=True)
+        assert "quasi-probability" in code
+
+    def test_explain_has_overhead_comment(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features, explain=True)
+        assert "Estimated overhead" in code
+
+    def test_normal_mode_no_noise_level_comment(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_pec_recipe(), shallow_features, explain=False)
+        assert "matches the expected hardware noise" not in code
