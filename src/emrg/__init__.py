@@ -83,6 +83,8 @@ def generate_recipe(
     *,
     explain: bool = False,
     circuit_name: str = "circuit",
+    technique: str | None = None,
+    noise_model_available: bool = False,
 ) -> GeneratedRecipe:
     """Analyze a circuit and generate a complete error mitigation recipe.
 
@@ -99,12 +101,20 @@ def generate_recipe(
     circuit_name:
         Variable name for the circuit in generated code
         (default ``"circuit"``).
+    technique:
+        Force a specific mitigation technique: ``"zne"`` or ``"pec"``.
+        When ``None`` (default), the engine auto-selects based on
+        circuit characteristics.
+    noise_model_available:
+        Whether a noise model is available for PEC (default ``False``).
+        Set to ``True`` to enable PEC consideration.
 
     Returns
     -------
     GeneratedRecipe
         Object with ``.code``, ``.rationale``, ``.features``, and
-        ``.recipe`` attributes.
+        ``.recipe`` attributes.  The recipe may use ZNE or PEC depending
+        on circuit characteristics and the *technique* override.
 
     Raises
     ------
@@ -125,8 +135,10 @@ def generate_recipe(
     >>> len(result.rationale) > 0
     True
     """
-    features = analyze_circuit(qc)
-    recipe = recommend(features)
+    features = analyze_circuit(
+        qc, noise_model_available=noise_model_available
+    )
+    recipe = recommend(features, technique=technique)
     code = generate_code(
         recipe,
         features,

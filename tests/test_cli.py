@@ -182,6 +182,8 @@ class TestAnalyze:
             "has_measurements",
             "estimated_noise_factor",
             "noise_category",
+            "noise_model_available",
+            "pec_overhead_estimate",
         }
         assert set(data.keys()) == expected_keys
 
@@ -278,3 +280,65 @@ class TestErrorHandling:
         )
         assert result.exit_code != 0
         assert "Cannot write to file" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC generate command
+# ---------------------------------------------------------------------------
+
+
+class TestGeneratePEC:
+    """Verify --technique and --noise-model flags for PEC."""
+
+    def test_generate_pec_override(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            main,
+            ["generate", str(BELL_QASM), "--technique", "pec", "--noise-model"],
+        )
+        assert result.exit_code == 0
+        assert "execute_with_pec" in result.output
+        assert "execute_with_zne" not in result.output
+
+    def test_generate_zne_override(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            main,
+            ["generate", str(BELL_QASM), "--technique", "zne", "--noise-model"],
+        )
+        assert result.exit_code == 0
+        assert "execute_with_zne" in result.output
+        assert "execute_with_pec" not in result.output
+
+    def test_generate_auto_no_noise_model(self, runner: CliRunner) -> None:
+        """Default (no --noise-model) -> ZNE for backward compatibility."""
+        result = runner.invoke(main, ["generate", str(BELL_QASM)])
+        assert result.exit_code == 0
+        assert "execute_with_zne" in result.output
+
+    def test_generate_pec_explain(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            main,
+            [
+                "generate", str(BELL_QASM),
+                "--technique", "pec",
+                "--noise-model",
+                "--explain",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Rationale:" in result.output
+        assert "PEC" in result.output
+
+    def test_analyze_json_has_pec_fields(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["analyze", str(BELL_QASM), "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "noise_model_available" in data
+        assert "pec_overhead_estimate" in data
+        assert isinstance(data["noise_model_available"], bool)
+        assert isinstance(data["pec_overhead_estimate"], float)
+
+    def test_analyze_table_has_pec_fields(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["analyze", str(BELL_QASM)])
+        assert result.exit_code == 0
+        assert "PEC overhead est:" in result.output
+        assert "Noise model avail:" in result.output

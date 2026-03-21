@@ -130,3 +130,48 @@ class TestPublicImports:
         assert callable(recommend)
         assert callable(generate_code)
         assert callable(generate_recipe)
+
+
+# ---------------------------------------------------------------------------
+# Tests: PEC via generate_recipe()
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateRecipePEC:
+    """Verify PEC integration through the public API."""
+
+    def test_pec_technique_override(self, bell_circuit: QuantumCircuit) -> None:
+        result = generate_recipe(
+            bell_circuit, technique="pec", noise_model_available=True
+        )
+        assert result.recipe.technique == "pec"
+        assert "execute_with_pec" in result.code
+        assert "execute_with_zne" not in result.code
+
+    def test_pec_auto_with_noise_model(self, bell_circuit: QuantumCircuit) -> None:
+        """Shallow circuit + noise model -> PEC auto-selected."""
+        result = generate_recipe(bell_circuit, noise_model_available=True)
+        assert result.recipe.technique == "pec"
+
+    def test_zne_default_without_noise_model(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        """Default (no noise_model_available) -> ZNE for backward compat."""
+        result = generate_recipe(bell_circuit)
+        assert result.recipe.technique == "zne"
+        assert "execute_with_zne" in result.code
+
+    def test_zne_override_with_noise_model(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        """technique='zne' forces ZNE even with noise model available."""
+        result = generate_recipe(
+            bell_circuit, technique="zne", noise_model_available=True
+        )
+        assert result.recipe.technique == "zne"
+
+    def test_pec_code_is_valid_python(self, bell_circuit: QuantumCircuit) -> None:
+        result = generate_recipe(
+            bell_circuit, technique="pec", noise_model_available=True
+        )
+        compile(result.code, "<emrg-pec-test>", "exec")

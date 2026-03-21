@@ -102,6 +102,8 @@ def _format_features_table(features: CircuitFeatures) -> str:
         f"  Has measurements:    {features.has_measurements}",
         f"  Noise estimate:      {features.estimated_noise_factor}",
         f"  Noise category:      {features.noise_category}",
+        f"  PEC overhead est:    {features.pec_overhead_estimate:.2f}",
+        f"  Noise model avail:   {features.noise_model_available}",
     ]
     return "\n".join(lines)
 
@@ -149,11 +151,24 @@ def main(ctx: click.Context) -> None:
     show_default=True,
     help="Variable name for the circuit in generated code.",
 )
+@click.option(
+    "--technique",
+    type=click.Choice(["zne", "pec"], case_sensitive=False),
+    default=None,
+    help="Force a specific mitigation technique (default: auto-detect).",
+)
+@click.option(
+    "--noise-model/--no-noise-model",
+    default=False,
+    help="Indicate whether a noise model is available (enables PEC).",
+)
 def generate(
     qasm_file: str,
     explain: bool,
     output_path: str | None,
     circuit_name: str,
+    technique: str | None,
+    noise_model: bool,
 ) -> None:
     """Generate error mitigation code from a QASM circuit.
 
@@ -162,11 +177,13 @@ def generate(
     qc = _load_circuit(qasm_file)
 
     try:
-        features = analyze_circuit(qc)
+        features = analyze_circuit(
+            qc, noise_model_available=noise_model
+        )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    recipe = recommend(features)
+    recipe = recommend(features, technique=technique)
     code = generate_code(
         recipe,
         features,
@@ -218,6 +235,8 @@ def analyze(qasm_file: str, json_output: bool) -> None:
             "has_measurements": features.has_measurements,
             "estimated_noise_factor": features.estimated_noise_factor,
             "noise_category": features.noise_category,
+            "noise_model_available": features.noise_model_available,
+            "pec_overhead_estimate": features.pec_overhead_estimate,
         }
         click.echo(json.dumps(data, indent=2))
     else:
