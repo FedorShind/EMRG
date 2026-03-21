@@ -219,6 +219,7 @@ Everything needed to go from circuit to mitigation recipe in one command:
 - [x] CLI with `generate` and `analyze` commands
 - [x] Public Python API (`generate_recipe()`)
 - [x] Example circuits (Python + QASM) and documentation
+- [x] 144 tests, 98% coverage, zero lint warnings
 
 ### Phase 2 -- More techniques, better validation (current)
 
@@ -229,18 +230,40 @@ Expand beyond ZNE so EMRG can recommend the right technique, not just the right 
 - [x] PEC code generation template
 - [x] `--technique` override and `--noise-model` CLI flags
 - [x] 215+ tests, 99% coverage, zero lint warnings
+- [ ] Clifford Data Regression (CDR) support
 - [ ] Layerwise Richardson integration
+- [ ] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] `--preview` mode (noisy simulation + fidelity plots)
 - [ ] Real hardware benchmarks (IBM Quantum devices)
-- [ ] Expanded tutorials (VQE, QAOA, random circuits)
+- [ ] Expanded tutorials (VQE for H₂, QAOA on MaxCut, random circuits)
 
 ### Phase 3 -- Multi-framework and community
 
 Make EMRG useful regardless of which framework you use:
 
-- [ ] Cirq and PennyLane input support
-- [ ] Configurable heuristics file
+- [ ] Cirq and PennyLane circuit input support
+- [ ] Noise model import from Qiskit Aer / real device calibration data
+- [ ] Configurable heuristics via YAML/JSON
+- [ ] Jupyter widget for interactive recipe exploration
 - [ ] Web/Colab interface
+
+### Phase 4 -- Intelligence layer
+
+Replace static rules with data-driven mitigation selection:
+
+- [ ] Train on benchmark data to predict optimal mitigation strategy
+- [ ] Circuit similarity search -- match against known-good configurations
+- [ ] Auto-tuning -- run `--preview` internally and iterate on parameters before output
+- [ ] Cost-aware optimization -- user specifies a shot budget, EMRG optimizes within that constraint
+
+### Phase 5 -- Ecosystem integration
+
+Make EMRG part of the standard quantum development workflow:
+
+- [ ] Qiskit Runtime integration
+- [ ] Mitiq Calibration API integration -- use calibration data to refine recommendations
+- [ ] VS Code extension -- analyze circuits inline while writing them
+- [ ] CI/CD integration -- add EMRG to quantum testing pipelines for automatic mitigation
 
 ## Tech Stack
 
@@ -259,5 +282,5 @@ EMRG is open source and contributions are welcome. If you have ideas, find bugs,
 
 ## Acknowledgments
 
-Built on [Mitiq](https://mitiq.readthedocs.io/) by [Unitary Fund](https://unitary.fund/).
+Built on [Mitiq](https://mitiq.readthedocs.io/) by [Unitary Foundation](https://unitary.foundation/).
 Inspired by the need to make quantum error mitigation accessible to everyone working with NISQ hardware.
