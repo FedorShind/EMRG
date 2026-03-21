@@ -337,3 +337,12 @@ class TestPECOverhead:
         """Can explicitly set noise_model_available=True."""
         f = analyze_circuit(bell_circuit, noise_model_available=True)
         assert f.noise_model_available is True
+
+    def test_pec_overhead_zero_multi_qubit_gates(self) -> None:
+        """Circuit with 0 multi-qubit gates: exp(0) = 1.0."""
+        qc = QuantumCircuit(1, 1)
+        qc.h(0)
+        qc.measure(0, 0)
+        f = analyze_circuit(qc)
+        assert f.multi_qubit_gate_count == 0
+        assert f.pec_overhead_estimate == pytest.approx(1.0, abs=1e-6)

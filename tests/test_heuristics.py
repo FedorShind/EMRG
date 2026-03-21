@@ -581,6 +581,15 @@ class TestPECRecipeContent:
         all_text = " ".join(recipe.rationale)
         assert "PEC" in all_text
 
+    def test_pec_recipe_overhead_matches_features(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=42.5,
+        )
+        recipe = recommend(f)
+        assert recipe.estimated_overhead == f.pec_overhead_estimate
+
     def test_rationale_mentions_temme(self) -> None:
         f = _make_features(
             depth=10,
@@ -616,3 +625,6 @@ class TestPECSamples:
     def test_exact_boundary_max(self) -> None:
         # overhead * 2 == 500 -> exactly PEC_MAX_SAMPLES
         assert _compute_pec_samples(250.0) == PEC_MAX_SAMPLES
+
+    def test_zero_overhead_clamps_to_min(self) -> None:
+        assert _compute_pec_samples(0.0) == PEC_MIN_SAMPLES

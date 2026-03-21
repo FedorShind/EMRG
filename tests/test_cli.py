@@ -342,3 +342,10 @@ class TestGeneratePEC:
         assert result.exit_code == 0
         assert "PEC overhead est:" in result.output
         assert "Noise model avail:" in result.output
+
+    def test_generate_invalid_technique(self, runner: CliRunner) -> None:
+        """Invalid --technique value is rejected by Click."""
+        result = runner.invoke(
+            main, ["generate", str(BELL_QASM), "--technique", "invalid"]
+        )
+        assert result.exit_code != 0
