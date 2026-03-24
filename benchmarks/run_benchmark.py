@@ -1,16 +1,23 @@
 """EMRG Benchmark Suite.
 
-Measures two things:
+Measures four things:
 
 1. **Tool performance** -- wall-clock time and memory overhead of
    ``analyze_circuit()`` / ``generate_recipe()`` across circuits ranging
-   from 2 to 50 qubits.  No simulation is involved; EMRG relies on pure
+   from 2 to 50+ qubits.  No simulation is involved; EMRG relies on pure
    Qiskit introspection, so even large circuits complete in milliseconds.
 
-2. **ZNE fidelity** -- end-to-end validation that EMRG-generated recipes
-   actually reduce noise.  We run ideal, noisy, and ZNE-mitigated
+2. **ZNE fidelity** -- end-to-end validation that EMRG-generated ZNE
+   recipes actually reduce noise.  We run ideal, noisy, and ZNE-mitigated
    simulations (Cirq ``DensityMatrixSimulator`` with per-gate depolarizing
    noise) and compare the resulting ``<Z_0>`` expectation values.
+
+3. **PEC fidelity** -- same methodology as ZNE, but using Mitiq's
+   ``execute_with_pec`` on shallow circuits where PEC is viable.
+
+4. **Layerwise vs global folding** -- compares ``fold_global`` and
+   ``fold_gates_at_random`` on circuits with heterogeneous layer structure
+   to validate EMRG's layerwise Richardson recommendation.
 
 All numbers printed to stdout are real measurements.  A machine-readable
 JSON copy is written to ``benchmarks/results.json``.
@@ -22,6 +29,7 @@ Usage::
 """
 
 import json
+import math
 import platform
 import sys
 import time
@@ -128,6 +136,32 @@ def make_hardware_efficient_ansatz(
     return qc
 
 
+def make_heterogeneous_circuit(
+    n_qubits: int,
+    n_layers: int,
+) -> QuantumCircuit:
+    """Circuit with alternating heavy and light CX layers.
+
+    Every fourth layer has parallel CX on all qubit pairs; other layers
+    have a single CX. This creates varied layer structure (heterogeneity
+    depends on qubit count and layer count).
+    """
+    rng = np.random.default_rng(77)
+    qc = QuantumCircuit(n_qubits)
+    for i in range(n_layers):
+        # Single-qubit rotations
+        for q in range(n_qubits):
+            qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+        # Heavy CX layer (every 4th) vs light CX layer
+        if i % 4 == 0:
+            for q in range(0, n_qubits - 1, 2):
+                qc.cx(q, q + 1)
+        else:
+            qc.cx(0, 1)
+    qc.measure_all()
+    return qc
+
+
 # ---------------------------------------------------------------------------
 # Part 1: Tool Performance
 # ---------------------------------------------------------------------------
@@ -141,7 +175,8 @@ class PerfResult:
     depth: int
     total_gates: int
     multi_qubit_gates: int
-    recipe_factory: str
+    layer_heterogeneity: float
+    technique_config: str
     time_ms: float        # median wall-clock for generate_recipe()
     peak_memory_kb: float  # tracemalloc peak (Python-heap only)
 
@@ -149,34 +184,40 @@ class PerfResult:
 def benchmark_performance(
     circuit: QuantumCircuit,
     name: str,
+    *,
+    noise_model_available: bool = False,
     n_runs: int = 100,
 ) -> PerfResult:
-    """Benchmark ``generate_recipe()`` over *n_runs* and return the median.
-
-    We measure the full ``generate_recipe()`` call, which internally runs
-    ``analyze_circuit()`` + heuristic selection + code generation -- i.e.
-    the complete user-facing operation.
-    """
+    """Benchmark ``generate_recipe()`` over *n_runs* and return the median."""
     # Warm-up (JIT, import caches, etc.)
     for _ in range(3):
-        generate_recipe(circuit)
+        generate_recipe(circuit, noise_model_available=noise_model_available)
 
     times: list[float] = []
     for _ in range(n_runs):
         t0 = time.perf_counter()
-        generate_recipe(circuit)
+        generate_recipe(circuit, noise_model_available=noise_model_available)
         t1 = time.perf_counter()
         times.append((t1 - t0) * 1000)
 
     # Peak memory (single run, Python heap only via tracemalloc).
     tracemalloc.start()
-    generate_recipe(circuit)
+    generate_recipe(circuit, noise_model_available=noise_model_available)
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    features = analyze_circuit(circuit)
-    recipe = generate_recipe(circuit)
+    features = analyze_circuit(
+        circuit, noise_model_available=noise_model_available
+    )
+    recipe = generate_recipe(
+        circuit, noise_model_available=noise_model_available
+    ).recipe
     median_ms = float(np.median(times))
+
+    if recipe.technique == "pec":
+        config = "PEC"
+    else:
+        config = f"{recipe.factory_name} + {recipe.scaling_method}"
 
     return PerfResult(
         name=name,
@@ -184,14 +225,15 @@ def benchmark_performance(
         depth=features.depth,
         total_gates=features.total_gate_count,
         multi_qubit_gates=features.multi_qubit_gate_count,
-        recipe_factory=recipe.recipe.factory_name,
+        layer_heterogeneity=round(features.layer_heterogeneity, 4),
+        technique_config=config,
         time_ms=round(median_ms, 3),
         peak_memory_kb=round(peak / 1024, 1),
     )
 
 
 # ---------------------------------------------------------------------------
-# Part 2: Fidelity Benchmark
+# Part 2: ZNE Fidelity Benchmark
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -202,7 +244,8 @@ class FidelityResult:
     n_qubits: int
     depth: int
     noise_level: str
-    factory_used: str
+    technique: str
+    config: str
     ideal_value: float
     noisy_value: float
     mitigated_value: float
@@ -217,12 +260,6 @@ def _make_cirq_executor(noise_level: float = 0.0):
     The executor computes the exact expectation value via density-matrix
     simulation (no shot noise), which eliminates statistical fluctuations
     and makes fidelity comparisons clean and reproducible.
-
-    .. note:: The return type annotation is intentionally omitted on the
-       inner function because Mitiq 0.48 uses ``inspect.getfullargspec``
-       (not ``typing.get_type_hints``) to detect the return type, and
-       ``from __future__ import annotations`` would turn the annotation
-       into a *string* that Mitiq cannot resolve.
     """
     import cirq
 
@@ -255,33 +292,39 @@ def _make_cirq_executor(noise_level: float = 0.0):
     return executor
 
 
-def benchmark_fidelity(
+def _compute_improvement(
+    ideal: float, noisy: float, mitigated: float,
+) -> float:
+    """Compute improvement factor: noisy_error / mitigated_error."""
+    noisy_err = abs(ideal - noisy)
+    mitigated_err = abs(ideal - mitigated)
+    if mitigated_err < 1e-10:
+        return float("inf") if noisy_err > 1e-10 else 1.0
+    if noisy_err < 1e-10:
+        return 1.0
+    return noisy_err / mitigated_err
+
+
+def benchmark_zne_fidelity(
     circuit: QuantumCircuit,
     name: str,
     noise_level: float,
     noise_label: str,
 ) -> FidelityResult:
-    """Compare ideal / noisy / EMRG-mitigated ``<Z_0>`` for *circuit*.
-
-    Uses Cirq ``DensityMatrixSimulator`` for exact (shot-noise-free)
-    expectation values.
-    """
+    """Compare ideal / noisy / EMRG-mitigated ``<Z_0>`` using ZNE."""
     from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
     from mitiq.zne import execute_with_zne
     from mitiq.zne.inference import LinearFactory, PolyFactory, RichardsonFactory
     from mitiq.zne.scaling import fold_gates_at_random, fold_global
 
-    # Strip measurements for Cirq / Mitiq (they operate on gate-only circuits).
     gate_only = circuit.copy()
     gate_only.remove_final_measurements()
     cirq_circuit = from_qiskit(gate_only)
 
     ideal_value = _make_cirq_executor(noise_level=0.0)(cirq_circuit)
-
     noisy_exec = _make_cirq_executor(noise_level=noise_level)
     noisy_value = noisy_exec(cirq_circuit)
 
-    # Build the factory exactly as EMRG recommends.
     recipe = generate_recipe(circuit).recipe
     factory_cls = {
         "LinearFactory": LinearFactory,
@@ -298,34 +341,157 @@ def benchmark_fidelity(
     }[recipe.scaling_method]
 
     mitigated_value = execute_with_zne(
-        cirq_circuit,
-        noisy_exec,
-        factory=factory,
-        scale_noise=scale_fn,
+        cirq_circuit, noisy_exec, factory=factory, scale_noise=scale_fn,
     )
 
     noisy_err = abs(ideal_value - noisy_value)
     mitigated_err = abs(ideal_value - mitigated_value)
-
-    if mitigated_err < 1e-10:
-        improvement = float("inf") if noisy_err > 1e-10 else 1.0
-    elif noisy_err < 1e-10:
-        improvement = 1.0
-    else:
-        improvement = noisy_err / mitigated_err
+    improvement = _compute_improvement(ideal_value, noisy_value, mitigated_value)
 
     return FidelityResult(
         name=name,
         n_qubits=circuit.num_qubits,
         depth=circuit.depth(),
         noise_level=noise_label,
-        factory_used=recipe.factory_name,
+        technique="ZNE",
+        config=f"{recipe.factory_name} + {recipe.scaling_method}",
         ideal_value=round(ideal_value, 4),
         noisy_value=round(noisy_value, 4),
         mitigated_value=round(mitigated_value, 4),
         noisy_error=round(noisy_err, 4),
         mitigated_error=round(mitigated_err, 4),
         improvement_factor=round(improvement, 2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part 3: PEC Fidelity Benchmark
+# ---------------------------------------------------------------------------
+
+def benchmark_pec_fidelity(
+    circuit: QuantumCircuit,
+    name: str,
+    noise_level: float,
+    noise_label: str,
+) -> FidelityResult:
+    """Compare ideal / noisy / PEC-mitigated ``<Z_0>``."""
+    from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
+    from mitiq.pec import execute_with_pec
+    from mitiq.pec.representations.depolarizing import (
+        represent_operations_in_circuit_with_local_depolarizing_noise,
+    )
+
+    gate_only = circuit.copy()
+    gate_only.remove_final_measurements()
+    cirq_circuit = from_qiskit(gate_only)
+
+    ideal_value = _make_cirq_executor(noise_level=0.0)(cirq_circuit)
+    noisy_exec = _make_cirq_executor(noise_level=noise_level)
+    noisy_value = noisy_exec(cirq_circuit)
+
+    # Build quasi-probability representations for PEC.
+    representations = represent_operations_in_circuit_with_local_depolarizing_noise(
+        cirq_circuit, noise_level=noise_level,
+    )
+
+    mitigated_value = execute_with_pec(
+        cirq_circuit,
+        noisy_exec,
+        representations=representations,
+        num_samples=200,
+        random_state=42,
+    )
+
+    noisy_err = abs(ideal_value - noisy_value)
+    mitigated_err = abs(ideal_value - mitigated_value)
+    improvement = _compute_improvement(ideal_value, noisy_value, mitigated_value)
+
+    return FidelityResult(
+        name=name,
+        n_qubits=circuit.num_qubits,
+        depth=circuit.depth(),
+        noise_level=noise_label,
+        technique="PEC",
+        config="PEC (depolarizing)",
+        ideal_value=round(ideal_value, 4),
+        noisy_value=round(noisy_value, 4),
+        mitigated_value=round(mitigated_value, 4),
+        noisy_error=round(noisy_err, 4),
+        mitigated_error=round(mitigated_err, 4),
+        improvement_factor=round(improvement, 2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part 4: Layerwise vs Global Folding Comparison
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LayerwiseResult:
+    """Comparison of fold_global vs fold_gates_at_random on one circuit."""
+
+    name: str
+    n_qubits: int
+    depth: int
+    layer_heterogeneity: float
+    noise_level: str
+    ideal_value: float
+    noisy_value: float
+    global_value: float
+    layerwise_value: float
+    global_improvement: float
+    layerwise_improvement: float
+    layerwise_wins: bool
+
+
+def benchmark_layerwise(
+    circuit: QuantumCircuit,
+    name: str,
+    noise_level: float,
+    noise_label: str,
+) -> LayerwiseResult:
+    """Run ZNE with both fold_global and fold_gates_at_random and compare."""
+    from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
+    from mitiq.zne import execute_with_zne
+    from mitiq.zne.inference import RichardsonFactory
+    from mitiq.zne.scaling import fold_gates_at_random, fold_global
+
+    gate_only = circuit.copy()
+    gate_only.remove_final_measurements()
+    cirq_circuit = from_qiskit(gate_only)
+
+    ideal_value = _make_cirq_executor(noise_level=0.0)(cirq_circuit)
+    noisy_exec = _make_cirq_executor(noise_level=noise_level)
+    noisy_value = noisy_exec(cirq_circuit)
+
+    global_value = execute_with_zne(
+        cirq_circuit, noisy_exec,
+        factory=RichardsonFactory(scale_factors=[1.0, 1.5, 2.0, 2.5]),
+        scale_noise=fold_global,
+    )
+    layerwise_value = execute_with_zne(
+        cirq_circuit, noisy_exec,
+        factory=RichardsonFactory(scale_factors=[1.0, 1.5, 2.0, 2.5]),
+        scale_noise=fold_gates_at_random,
+    )
+
+    features = analyze_circuit(circuit)
+    global_imp = _compute_improvement(ideal_value, noisy_value, global_value)
+    layerwise_imp = _compute_improvement(ideal_value, noisy_value, layerwise_value)
+
+    return LayerwiseResult(
+        name=name,
+        n_qubits=circuit.num_qubits,
+        depth=circuit.depth(),
+        layer_heterogeneity=round(features.layer_heterogeneity, 4),
+        noise_level=noise_label,
+        ideal_value=round(ideal_value, 4),
+        noisy_value=round(noisy_value, 4),
+        global_value=round(global_value, 4),
+        layerwise_value=round(layerwise_value, 4),
+        global_improvement=round(global_imp, 2),
+        layerwise_improvement=round(layerwise_imp, 2),
+        layerwise_wins=bool(layerwise_imp > global_imp),
     )
 
 
@@ -338,9 +504,9 @@ def main() -> None:
     import mitiq
     import qiskit
 
-    print("=" * 70)
+    print("=" * 78)
     print("EMRG Benchmark Suite")
-    print("=" * 70)
+    print("=" * 78)
     print(f"  Python:  {sys.version.split()[0]}")
     print(f"  OS:      {platform.system()} {platform.release()}")
     print(f"  Qiskit:  {qiskit.__version__}")
@@ -351,55 +517,57 @@ def main() -> None:
     # -------------------------------------------------------------------
     # Part 1: Tool Performance
     # -------------------------------------------------------------------
-    print("=" * 70)
+    print("=" * 78)
     print("PART 1: Tool Performance (generate_recipe, median of 100 runs)")
-    print("=" * 70)
+    print("=" * 78)
     print()
 
     perf_circuits = [
-        ("Bell (2q)",              make_bell()),
-        ("GHZ-5",                  make_ghz(5)),
-        ("GHZ-10",                 make_ghz(10)),
-        ("Random 10q (3 layers)",  make_random_circuit(10, 3)),
-        ("Random 20q (6 layers)",  make_random_circuit(20, 6)),
-        ("VQE 10q (4 layers)",     make_hardware_efficient_ansatz(10, 4)),
-        ("Random 30q (10 layers)", make_random_circuit(30, 10)),
-        ("Random 50q (15 layers)", make_random_circuit(50, 15)),
+        ("Bell (2q)",              make_bell(), False),
+        ("Bell (2q, PEC)",         make_bell(), True),
+        ("GHZ-5",                  make_ghz(5), False),
+        ("GHZ-10",                 make_ghz(10), False),
+        ("Random 10q (3 layers)",  make_random_circuit(10, 3), False),
+        ("Random 20q (6 layers)",  make_random_circuit(20, 6), False),
+        ("VQE 10q (4 layers)",     make_hardware_efficient_ansatz(10, 4), False),
+        ("Hetero 4q (8 layers)",   make_heterogeneous_circuit(4, 8), False),
+        ("Random 30q (10 layers)", make_random_circuit(30, 10), False),
+        ("Random 50q (15 layers)", make_random_circuit(50, 15), False),
     ]
 
     perf_results: list[PerfResult] = []
-    for name, circ in perf_circuits:
+    for name, circ, noise_avail in perf_circuits:
         print(f"  {name} ...", end=" ", flush=True)
-        r = benchmark_performance(circ, name)
+        r = benchmark_performance(circ, name, noise_model_available=noise_avail)
         perf_results.append(r)
         print(f"{r.time_ms:.2f} ms")
 
     print()
     header = (
-        f"{'Circuit':<26} {'Qubits':>6} {'Depth':>6} {'Gates':>6} "
-        f"{'MQ':>4} {'Factory':<20} {'Time':>10} {'Mem':>10}"
+        f"{'Circuit':<26} {'Qb':>3} {'Dep':>4} {'Gates':>6} "
+        f"{'MQ':>4} {'Het':>6} {'Technique / Config':<34} "
+        f"{'Time':>10} {'Mem':>10}"
     )
     print(header)
     print("-" * len(header))
     for r in perf_results:
         print(
-            f"{r.name:<26} {r.n_qubits:>6} {r.depth:>6} "
+            f"{r.name:<26} {r.n_qubits:>3} {r.depth:>4} "
             f"{r.total_gates:>6} {r.multi_qubit_gates:>4} "
-            f"{r.recipe_factory:<20} {r.time_ms:>8.3f}ms "
-            f"{r.peak_memory_kb:>8.1f}KB"
+            f"{r.layer_heterogeneity:>6.2f} {r.technique_config:<34} "
+            f"{r.time_ms:>8.3f}ms {r.peak_memory_kb:>8.1f}KB"
         )
     print()
 
     # -------------------------------------------------------------------
-    # Part 2: Fidelity Benchmark
+    # Part 2: ZNE Fidelity Benchmark
     # -------------------------------------------------------------------
-    print("=" * 70)
+    print("=" * 78)
     print("PART 2: ZNE Fidelity (ideal vs noisy vs EMRG-mitigated)")
-    print("=" * 70)
+    print("=" * 78)
     print()
 
-    fidelity_tests = [
-        # (label, circuit, depolarizing probability)
+    zne_tests = [
         ("X-flip 2q",            make_x_circuit(2), 0.01),
         ("X-flip 3q",            make_x_circuit(3), 0.01),
         ("X-flip 2q (noisy)",    make_x_circuit(2), 0.05),
@@ -409,28 +577,80 @@ def main() -> None:
         ("VQE 4q (2L, noisy)",   make_hardware_efficient_ansatz(4, 2), 0.05),
     ]
 
-    fidelity_results: list[FidelityResult] = []
-    for name, circ, noise_p in fidelity_tests:
+    zne_results: list[FidelityResult] = []
+    for name, circ, noise_p in zne_tests:
         print(f"  {name} ...", end=" ", flush=True)
-        r = benchmark_fidelity(circ, name, noise_p, f"depol p={noise_p}")
-        fidelity_results.append(r)
+        r = benchmark_zne_fidelity(circ, name, noise_p, f"depol p={noise_p}")
+        zne_results.append(r)
         print(f"{r.improvement_factor:.1f}x improvement")
 
     print()
-    fhdr = (
-        f"{'Circuit':<22} {'Qb':>3} {'Dep':>4} {'Noise':<14} "
-        f"{'Factory':<20} {'Ideal':>8} {'Noisy':>8} "
-        f"{'Mitigated':>10} {'Err_N':>8} {'Err_M':>8} {'Improv':>8}"
+    _print_fidelity_table(zne_results)
+
+    # -------------------------------------------------------------------
+    # Part 3: PEC Fidelity Benchmark
+    # -------------------------------------------------------------------
+    print("=" * 78)
+    print("PART 3: PEC Fidelity (ideal vs noisy vs PEC-mitigated)")
+    print("=" * 78)
+    print()
+
+    pec_tests = [
+        ("Bell (PEC)",      make_bell(), 0.01),
+        ("GHZ-3 (PEC)",     make_ghz(3), 0.01),
+        ("VQE 4q 2L (PEC)", make_hardware_efficient_ansatz(4, 2), 0.01),
+    ]
+
+    pec_results: list[FidelityResult] = []
+    for name, circ, noise_p in pec_tests:
+        print(f"  {name} ...", end=" ", flush=True)
+        r = benchmark_pec_fidelity(circ, name, noise_p, f"depol p={noise_p}")
+        pec_results.append(r)
+        print(f"{r.improvement_factor:.1f}x improvement")
+
+    print()
+    _print_fidelity_table(pec_results)
+
+    # -------------------------------------------------------------------
+    # Part 4: Layerwise vs Global Folding
+    # -------------------------------------------------------------------
+    print("=" * 78)
+    print("PART 4: Layerwise (fold_gates_at_random) vs Global (fold_global)")
+    print("=" * 78)
+    print()
+
+    layerwise_tests = [
+        ("Hetero 4q (6L)",  make_heterogeneous_circuit(4, 6), 0.01),
+        ("Hetero 4q (8L)",  make_heterogeneous_circuit(4, 8), 0.01),
+        ("Hetero 4q (6L, noisy)", make_heterogeneous_circuit(4, 6), 0.05),
+    ]
+
+    layerwise_results: list[LayerwiseResult] = []
+    for name, circ, noise_p in layerwise_tests:
+        print(f"  {name} ...", end=" ", flush=True)
+        r = benchmark_layerwise(circ, name, noise_p, f"depol p={noise_p}")
+        layerwise_results.append(r)
+        winner = "layerwise" if r.layerwise_wins else "global"
+        print(f"global={r.global_improvement:.1f}x, "
+              f"layerwise={r.layerwise_improvement:.1f}x ({winner} wins)")
+
+    print()
+    lhdr = (
+        f"{'Circuit':<22} {'Qb':>3} {'Dep':>4} {'Het':>6} "
+        f"{'Noise':<14} {'Ideal':>8} {'Noisy':>8} "
+        f"{'Global':>8} {'Layer':>8} {'G_imp':>6} {'L_imp':>6} {'Winner':>8}"
     )
-    print(fhdr)
-    print("-" * len(fhdr))
-    for r in fidelity_results:
+    print(lhdr)
+    print("-" * len(lhdr))
+    for r in layerwise_results:
+        winner = "layer" if r.layerwise_wins else "global"
         print(
             f"{r.name:<22} {r.n_qubits:>3} {r.depth:>4} "
-            f"{r.noise_level:<14} {r.factory_used:<20} "
+            f"{r.layer_heterogeneity:>6.2f} {r.noise_level:<14} "
             f"{r.ideal_value:>8.4f} {r.noisy_value:>8.4f} "
-            f"{r.mitigated_value:>10.4f} {r.noisy_error:>8.4f} "
-            f"{r.mitigated_error:>8.4f} {r.improvement_factor:>7.1f}x"
+            f"{r.global_value:>8.4f} {r.layerwise_value:>8.4f} "
+            f"{r.global_improvement:>5.1f}x {r.layerwise_improvement:>5.1f}x "
+            f"{winner:>8}"
         )
     print()
 
@@ -446,11 +666,38 @@ def main() -> None:
             "emrg": emrg.__version__,
         },
         "performance": [asdict(r) for r in perf_results],
-        "fidelity": [asdict(r) for r in fidelity_results],
+        "zne_fidelity": [asdict(r) for r in zne_results],
+        "pec_fidelity": [asdict(r) for r in pec_results],
+        "layerwise_comparison": [asdict(r) for r in layerwise_results],
     }
 
     _RESULTS_PATH.write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"Results saved to {_RESULTS_PATH.relative_to(Path.cwd())}")
+
+
+def _print_fidelity_table(results: list[FidelityResult]) -> None:
+    """Print a formatted fidelity results table."""
+    fhdr = (
+        f"{'Circuit':<22} {'Qb':>3} {'Dep':>4} {'Noise':<14} "
+        f"{'Technique / Config':<26} {'Ideal':>8} {'Noisy':>8} "
+        f"{'Mitigated':>10} {'Err_N':>8} {'Err_M':>8} {'Improv':>8}"
+    )
+    print(fhdr)
+    print("-" * len(fhdr))
+    for r in results:
+        imp_str = (
+            f"{r.improvement_factor:>7.1f}x"
+            if not math.isinf(r.improvement_factor)
+            else "     inf"
+        )
+        print(
+            f"{r.name:<22} {r.n_qubits:>3} {r.depth:>4} "
+            f"{r.noise_level:<14} {r.config:<26} "
+            f"{r.ideal_value:>8.4f} {r.noisy_value:>8.4f} "
+            f"{r.mitigated_value:>10.4f} {r.noisy_error:>8.4f} "
+            f"{r.mitigated_error:>8.4f} {imp_str}"
+        )
+    print()
 
 
 if __name__ == "__main__":
