@@ -135,6 +135,11 @@ class CircuitFeatures:
         pec_overhead_estimate: Approximate PEC sampling overhead computed as
             ``exp(2 * noise_factor * multi_qubit_gate_count)``.  Values much
             larger than ~1000 make PEC impractical.
+        layer_heterogeneity: Ratio of the maximum to minimum multi-qubit gate
+            count across circuit layers (with +1 denominator smoothing).
+            Higher values indicate more varied layer structure, which favours
+            layerwise noise scaling over uniform folding.  Returns 0.0 when
+            the circuit has fewer than two layers containing multi-qubit gates.
     """
 
     num_qubits: int
@@ -149,6 +154,7 @@ class CircuitFeatures:
     noise_category: str = "low"
     noise_model_available: bool = False
     pec_overhead_estimate: float = 1.0
+    layer_heterogeneity: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +262,37 @@ def _estimate_pec_overhead(
 
 
 # ---------------------------------------------------------------------------
+# Layer heterogeneity
+# ---------------------------------------------------------------------------
+
+
+def _compute_layer_heterogeneity(qc: QuantumCircuit) -> float:
+    """Compute how unevenly multi-qubit gates are distributed across layers.
+
+    Returns ``max(counts) / (min(counts) + 1)`` over circuit layers that
+    contain at least one multi-qubit gate.  Returns 0.0 when fewer than
+    two such layers exist (no variation is possible).
+    """
+    from qiskit.converters import circuit_to_dag
+
+    dag = circuit_to_dag(qc)
+    mq_counts: list[int] = []
+    for layer_dict in dag.layers():
+        layer_dag = layer_dict["graph"]
+        mq = sum(
+            1
+            for node in layer_dag.op_nodes()
+            if node.op.name in MULTI_QUBIT_GATE_NAMES
+        )
+        if mq > 0:
+            mq_counts.append(mq)
+
+    if len(mq_counts) < 2:
+        return 0.0
+    return max(mq_counts) / (min(mq_counts) + 1)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -334,6 +371,7 @@ def analyze_circuit(
     )
 
     pec_overhead = _estimate_pec_overhead(noise_factor, multi_qubit_gate_count)
+    layer_het = _compute_layer_heterogeneity(qc)
 
     return CircuitFeatures(
         num_qubits=qc.num_qubits,
@@ -348,4 +386,5 @@ def analyze_circuit(
         noise_category=_classify_noise(noise_factor),
         noise_model_available=noise_model_available,
         pec_overhead_estimate=round(pec_overhead, 6),
+        layer_heterogeneity=round(layer_het, 4),
     )
