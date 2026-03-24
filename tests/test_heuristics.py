@@ -516,6 +516,18 @@ class TestPECRecommend:
         recipe_default = recommend(f)
         assert recipe_auto.technique == recipe_default.technique == "pec"
 
+    def test_invalid_technique_raises(self) -> None:
+        """Unknown technique strings should raise ValueError."""
+        f = _make_features(depth=10)
+        with pytest.raises(ValueError, match="Unknown technique"):
+            recommend(f, technique="invalid")
+
+    def test_invalid_technique_cdr_raises(self) -> None:
+        """CDR is not yet supported and should raise."""
+        f = _make_features(depth=10)
+        with pytest.raises(ValueError, match="Unknown technique"):
+            recommend(f, technique="cdr")
+
 
 # ---------------------------------------------------------------------------
 # Tests: PEC recipe content

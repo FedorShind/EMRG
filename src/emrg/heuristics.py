@@ -435,6 +435,13 @@ def recommend(
     >>> recipe.factory_name
     'LinearFactory'
     """
+    # --- validate technique ---------------------------------------------------
+    _valid_techniques = {"zne", "pec", None}
+    if technique not in _valid_techniques:
+        raise ValueError(
+            f"Unknown technique {technique!r}. Must be 'zne', 'pec', or None."
+        )
+
     # --- technique override --------------------------------------------------
     if technique == "pec":
         return _build_pec_recipe(features)
