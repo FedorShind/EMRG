@@ -184,6 +184,7 @@ class TestAnalyze:
             "noise_category",
             "noise_model_available",
             "pec_overhead_estimate",
+            "layer_heterogeneity",
         }
         assert set(data.keys()) == expected_keys
 
@@ -349,3 +350,24 @@ class TestGeneratePEC:
             main, ["generate", str(BELL_QASM), "--technique", "invalid"]
         )
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: layer heterogeneity in analyze output
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeLayerHeterogeneity:
+    """Verify layer_heterogeneity appears in analyze output."""
+
+    def test_table_shows_layer_heterogeneity(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["analyze", str(BELL_QASM)])
+        assert result.exit_code == 0
+        assert "Layer heterogeneity:" in result.output
+
+    def test_json_has_layer_heterogeneity(self, runner: CliRunner) -> None:
+        result = runner.invoke(main, ["analyze", str(BELL_QASM), "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "layer_heterogeneity" in data
+        assert isinstance(data["layer_heterogeneity"], float)

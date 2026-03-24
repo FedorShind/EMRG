@@ -646,3 +646,72 @@ class TestPECExplainMode:
     ) -> None:
         code = generate_code(_make_pec_recipe(), shallow_features, explain=False)
         assert "matches the expected hardware noise" not in code
+
+
+# ---------------------------------------------------------------------------
+# Helpers: layerwise Richardson recipe
+# ---------------------------------------------------------------------------
+
+
+def _make_layerwise_richardson_recipe() -> MitigationRecipe:
+    return MitigationRecipe(
+        technique="zne",
+        factory_name="RichardsonFactory",
+        scale_factors=(1.0, 1.5, 2.0, 2.5),
+        factory_kwargs={},
+        scaling_method="fold_gates_at_random",
+        rationale=(
+            "Moderate depth with high layer heterogeneity.",
+            "arXiv:2005.10921.",
+        ),
+        noise_category="moderate",
+        estimated_overhead=4.0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests: layerwise Richardson codegen
+# ---------------------------------------------------------------------------
+
+
+class TestLayerwiseRichardsonCodegen:
+    """Verify codegen handles layerwise Richardson correctly."""
+
+    def test_layerwise_has_inline_comment(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_layerwise_richardson_recipe(), moderate_features)
+        assert "fold_gates_at_random selected" in code
+        assert "uneven noise density" in code
+
+    def test_standard_richardson_no_layerwise_comment(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_richardson_recipe(), moderate_features)
+        assert "fold_gates_at_random selected" not in code
+
+    def test_poly_no_layerwise_comment(
+        self, deep_features: CircuitFeatures
+    ) -> None:
+        """PolyFactory also uses fold_gates_at_random but should NOT get
+        the layerwise comment."""
+        code = generate_code(_make_poly_recipe(), deep_features)
+        assert "fold_gates_at_random selected" not in code
+
+    def test_layerwise_imports_fold_gates_at_random(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_layerwise_richardson_recipe(), moderate_features)
+        assert "from mitiq.zne.scaling import fold_gates_at_random" in code
+
+    def test_layerwise_execution_uses_fold_gates_at_random(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_layerwise_richardson_recipe(), moderate_features)
+        assert "scale_noise=fold_gates_at_random," in code
+
+    def test_layerwise_compiles(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_layerwise_richardson_recipe(), moderate_features)
+        compile(code, "<emrg-layerwise-test>", "exec")

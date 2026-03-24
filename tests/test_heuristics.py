@@ -7,6 +7,7 @@ import pytest
 from emrg.analyzer import CircuitFeatures
 from emrg.heuristics import (
     DEFAULT_RULES,
+    LAYERWISE_HETEROGENEITY_THRESHOLD,
     PEC_DEFAULT_NOISE_LEVEL,
     PEC_MAX_SAMPLES,
     PEC_MIN_SAMPLES,
@@ -14,6 +15,7 @@ from emrg.heuristics import (
     _compute_pec_samples,
     _is_deep_or_high_noise,
     _is_moderate_depth,
+    _is_moderate_heterogeneous,
     _is_shallow,
     _should_use_pec,
     recommend,
@@ -374,8 +376,8 @@ class TestDefaultRules:
     def test_rules_is_tuple(self) -> None:
         assert isinstance(DEFAULT_RULES, tuple)
 
-    def test_rules_has_three_entries(self) -> None:
-        assert len(DEFAULT_RULES) == 3
+    def test_rules_has_four_entries(self) -> None:
+        assert len(DEFAULT_RULES) == 4
 
     def test_each_rule_is_callable_pair(self) -> None:
         for predicate, builder in DEFAULT_RULES:
@@ -628,3 +630,115 @@ class TestPECSamples:
 
     def test_zero_overhead_clamps_to_min(self) -> None:
         assert _compute_pec_samples(0.0) == PEC_MIN_SAMPLES
+
+
+# ---------------------------------------------------------------------------
+# Tests: layerwise Richardson predicate
+# ---------------------------------------------------------------------------
+
+
+class TestLayerwisePredicate:
+    """Verify _is_moderate_heterogeneous matches the correct features."""
+
+    def test_matches_moderate_high_heterogeneity(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=3.0)
+        assert _is_moderate_heterogeneous(f) is True
+
+    def test_rejects_low_heterogeneity(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=1.0)
+        assert _is_moderate_heterogeneous(f) is False
+
+    def test_boundary_heterogeneity_exactly_2(self) -> None:
+        """Exactly 2.0 should NOT trigger (strict >)."""
+        f = _make_features(depth=30, layer_heterogeneity=2.0)
+        assert _is_moderate_heterogeneous(f) is False
+
+    def test_boundary_heterogeneity_2_01(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=2.01)
+        assert _is_moderate_heterogeneous(f) is True
+
+    def test_boundary_depth_15_included(self) -> None:
+        f = _make_features(depth=15, layer_heterogeneity=3.0)
+        assert _is_moderate_heterogeneous(f) is True
+
+    def test_boundary_depth_14_excluded(self) -> None:
+        f = _make_features(depth=14, layer_heterogeneity=5.0)
+        assert _is_moderate_heterogeneous(f) is False
+
+    def test_boundary_depth_50_included(self) -> None:
+        f = _make_features(depth=50, layer_heterogeneity=3.0)
+        assert _is_moderate_heterogeneous(f) is True
+
+    def test_boundary_depth_51_excluded(self) -> None:
+        f = _make_features(depth=51, layer_heterogeneity=5.0)
+        assert _is_moderate_heterogeneous(f) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: layerwise Richardson recommend()
+# ---------------------------------------------------------------------------
+
+
+class TestLayerwiseRichardson:
+    """Verify recommend() selects layerwise Richardson when appropriate."""
+
+    def test_high_heterogeneity_gets_fold_gates_at_random(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=3.0)
+        recipe = recommend(f)
+        assert recipe.factory_name == "RichardsonFactory"
+        assert recipe.scaling_method == "fold_gates_at_random"
+
+    def test_low_heterogeneity_gets_fold_global(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=1.0)
+        recipe = recommend(f)
+        assert recipe.factory_name == "RichardsonFactory"
+        assert recipe.scaling_method == "fold_global"
+
+    def test_boundary_exactly_2_not_layerwise(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=2.0)
+        recipe = recommend(f)
+        assert recipe.scaling_method == "fold_global"
+
+    def test_boundary_2_01_is_layerwise(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=2.01)
+        recipe = recommend(f)
+        assert recipe.scaling_method == "fold_gates_at_random"
+
+    def test_depth_14_not_layerwise(self) -> None:
+        """Below LAYERWISE_MIN_DEPTH -> falls to shallow rule."""
+        f = _make_features(
+            depth=14, layer_heterogeneity=5.0, multi_qubit_gate_count=3,
+        )
+        recipe = recommend(f)
+        assert recipe.factory_name == "LinearFactory"
+        assert recipe.scaling_method == "fold_global"
+
+    def test_depth_51_gets_poly(self) -> None:
+        """Above LAYERWISE_MAX_DEPTH -> deep rule takes priority."""
+        f = _make_features(
+            depth=51, layer_heterogeneity=5.0, noise_category="moderate",
+        )
+        recipe = recommend(f)
+        assert recipe.factory_name == "PolyFactory"
+
+    def test_rationale_mentions_heterogeneity(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=3.0)
+        recipe = recommend(f)
+        all_text = " ".join(recipe.rationale)
+        assert "heterogeneity" in all_text
+        assert str(LAYERWISE_HETEROGENEITY_THRESHOLD) in all_text
+
+    def test_scaling_method_is_fold_gates_at_random(self) -> None:
+        f = _make_features(depth=25, layer_heterogeneity=4.0)
+        recipe = recommend(f)
+        assert recipe.scaling_method == "fold_gates_at_random"
+
+    def test_technique_is_zne(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=3.0)
+        recipe = recommend(f)
+        assert recipe.technique == "zne"
+
+    def test_scale_factors_match_standard_richardson(self) -> None:
+        f = _make_features(depth=30, layer_heterogeneity=3.0)
+        recipe = recommend(f)
+        assert recipe.scale_factors == (1.0, 1.5, 2.0, 2.5)

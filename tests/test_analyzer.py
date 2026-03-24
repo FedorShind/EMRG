@@ -346,3 +346,60 @@ class TestPECOverhead:
         f = analyze_circuit(qc)
         assert f.multi_qubit_gate_count == 0
         assert f.pec_overhead_estimate == pytest.approx(1.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Tests: layer heterogeneity
+# ---------------------------------------------------------------------------
+
+
+class TestLayerHeterogeneity:
+    """Verify layer_heterogeneity computation."""
+
+    def test_uniform_circuit_low_heterogeneity(self) -> None:
+        """Circuit where every CX layer has the same count -> ~0."""
+        qc = QuantumCircuit(3, 3)
+        # Two identical layers: each has 1 CX
+        qc.cx(0, 1)
+        qc.barrier()
+        qc.cx(1, 2)
+        qc.measure(range(3), range(3))
+        f = analyze_circuit(qc)
+        # Both layers have 1 multi-qubit gate: max=1, min=1 -> 1/(1+1) = 0.5
+        assert f.layer_heterogeneity <= 1.0
+
+    def test_heterogeneous_circuit(self) -> None:
+        """Circuit with varied multi-qubit gate counts across layers."""
+        qc = QuantumCircuit(4, 4)
+        # Layer 1: 3 CX gates (parallel on different qubits is same layer)
+        qc.cx(0, 1)
+        qc.cx(2, 3)
+        qc.barrier()
+        # Layer 2: 1 CX gate
+        qc.cx(0, 1)
+        qc.measure(range(4), range(4))
+        f = analyze_circuit(qc)
+        assert f.layer_heterogeneity > 0.0
+
+    def test_no_multi_qubit_gates_zero(self) -> None:
+        """Circuit with only single-qubit gates -> 0.0."""
+        qc = QuantumCircuit(2, 2)
+        qc.h(0)
+        qc.h(1)
+        qc.measure([0, 1], [0, 1])
+        f = analyze_circuit(qc)
+        assert f.layer_heterogeneity == 0.0
+
+    def test_single_multi_qubit_layer_zero(self) -> None:
+        """Only one layer has multi-qubit gates -> 0.0 (no variation)."""
+        qc = QuantumCircuit(2, 2)
+        qc.h(0)
+        qc.cx(0, 1)
+        qc.measure([0, 1], [0, 1])
+        f = analyze_circuit(qc)
+        assert f.layer_heterogeneity == 0.0
+
+    def test_bell_circuit_heterogeneity(self, bell_circuit: QuantumCircuit) -> None:
+        """Bell circuit has 1 CX in 1 layer -> 0.0."""
+        f = analyze_circuit(bell_circuit)
+        assert f.layer_heterogeneity == 0.0
