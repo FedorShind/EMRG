@@ -50,6 +50,9 @@ __all__ = [
     "PEC_DEFAULT_NOISE_LEVEL",
     "PEC_MIN_SAMPLES",
     "PEC_MAX_SAMPLES",
+    "LAYERWISE_MIN_DEPTH",
+    "LAYERWISE_MAX_DEPTH",
+    "LAYERWISE_HETEROGENEITY_THRESHOLD",
 ]
 
 # ---------------------------------------------------------------------------
@@ -79,6 +82,15 @@ PEC_MIN_SAMPLES: int = 100
 
 #: Maximum number of PEC samples to request.
 PEC_MAX_SAMPLES: int = 500
+
+#: Minimum circuit depth for layerwise Richardson consideration.
+LAYERWISE_MIN_DEPTH: int = 15
+
+#: Maximum circuit depth for layerwise Richardson consideration.
+LAYERWISE_MAX_DEPTH: int = 50
+
+#: Minimum layer heterogeneity (exclusive) to trigger layerwise Richardson.
+LAYERWISE_HETEROGENEITY_THRESHOLD: float = 2.0
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -211,6 +223,19 @@ def _is_moderate_depth(features: CircuitFeatures) -> bool:
     return DEPTH_MODERATE_THRESHOLD <= features.depth <= DEPTH_DEEP_THRESHOLD
 
 
+def _is_moderate_heterogeneous(features: CircuitFeatures) -> bool:
+    """Match moderate-depth circuits with high layer heterogeneity.
+
+    These circuits benefit from per-gate noise folding rather than
+    uniform folding because their layers have uneven multi-qubit gate
+    density.
+    """
+    return (
+        LAYERWISE_MIN_DEPTH <= features.depth <= LAYERWISE_MAX_DEPTH
+        and features.layer_heterogeneity > LAYERWISE_HETEROGENEITY_THRESHOLD
+    )
+
+
 def _is_shallow(features: CircuitFeatures) -> bool:
     """Match shallow, low-gate-count circuits (depth < 20, multi-qubit < 50)."""
     return (
@@ -263,6 +288,30 @@ def _build_richardson_recipe(features: CircuitFeatures) -> MitigationRecipe:
             "(Temme et al., PRL 119, 180509, 2017).",
             "fold_global provides uniform noise amplification suitable "
             "for structured circuits at moderate depth.",
+            "Four scale factors balance accuracy vs. shot overhead.",
+        ),
+        noise_category=features.noise_category,
+        estimated_overhead=4.0,
+    )
+
+
+def _build_layerwise_richardson_recipe(features: CircuitFeatures) -> MitigationRecipe:
+    """Build a layerwise RichardsonFactory recipe for heterogeneous circuits."""
+    return MitigationRecipe(
+        technique="zne",
+        factory_name="RichardsonFactory",
+        scale_factors=(1.0, 1.5, 2.0, 2.5),
+        factory_kwargs=_freeze_kwargs({}),
+        scaling_method="fold_gates_at_random",
+        rationale=(
+            f"Circuit depth ({features.depth}) is moderate (15-50) with "
+            f"high layer heterogeneity ({features.layer_heterogeneity:.2f} "
+            f"> {LAYERWISE_HETEROGENEITY_THRESHOLD}).",
+            "Layers have uneven multi-qubit gate density, so "
+            "fold_gates_at_random targets the noisiest gates rather than "
+            "amplifying noise uniformly (arXiv:2005.10921).",
+            "RichardsonFactory provides polynomial interpolation suited "
+            "for moderate-depth circuits with non-uniform noise.",
             "Four scale factors balance accuracy vs. shot overhead.",
         ),
         noise_category=features.noise_category,
@@ -324,13 +373,15 @@ def _build_fallback_recipe(features: CircuitFeatures) -> MitigationRecipe:
 #: Ordered list of ``(predicate, builder)`` rules.  First match wins.
 #:
 #: Priority order:
-#: 1. Deep / high-noise  ->  PolyFactory + fold_gates_at_random
-#: 2. Moderate depth     ->  RichardsonFactory + fold_global
-#: 3. Shallow / low-gate ->  LinearFactory + fold_global
+#: 1. Deep / high-noise           ->  PolyFactory + fold_gates_at_random
+#: 2. Moderate + heterogeneous    ->  RichardsonFactory + fold_gates_at_random
+#: 3. Moderate depth (uniform)    ->  RichardsonFactory + fold_global
+#: 4. Shallow / low-gate          ->  LinearFactory + fold_global
 #:
 #: If none match, :func:`recommend` uses :func:`_build_fallback_recipe`.
 DEFAULT_RULES: tuple[Rule, ...] = (
     (_is_deep_or_high_noise, _build_poly_recipe),
+    (_is_moderate_heterogeneous, _build_layerwise_richardson_recipe),
     (_is_moderate_depth, _build_richardson_recipe),
     (_is_shallow, _build_linear_recipe),
 )
