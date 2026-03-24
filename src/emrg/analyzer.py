@@ -254,11 +254,14 @@ def _estimate_pec_overhead(
 
     The formula ``exp(2 * noise_factor * multi_qubit_gate_count)`` captures
     the exponential cost that makes PEC impractical for large or very noisy
-    circuits.
+    circuits.  The exponent is capped at 700 to avoid ``OverflowError`` on
+    circuits with hundreds of multi-qubit gates.
     """
-    return math.exp(
-        PEC_OVERHEAD_NOISE_MULTIPLIER * noise_factor * multi_qubit_gate_count
-    )
+    exponent = PEC_OVERHEAD_NOISE_MULTIPLIER * noise_factor * multi_qubit_gate_count
+    # math.exp overflows around ~709; cap to prevent OverflowError.
+    if exponent > 700:
+        return math.inf
+    return math.exp(exponent)
 
 
 # ---------------------------------------------------------------------------
