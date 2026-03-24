@@ -168,78 +168,76 @@ Real measurements from EMRG v0.2.5, collected automatically by [`benchmarks/run_
 
 ### Tool Performance
 
-EMRG relies on pure Qiskit introspection (no simulation), so `generate_recipe()` completes in sub-millisecond time even for large circuits. v0.2.5 adds layer heterogeneity analysis via DAG conversion, which adds minor overhead. Median of 100 runs:
+EMRG relies on pure Qiskit introspection (no simulation), so `generate_recipe()` completes in sub-millisecond time even for large circuits. Median of 100 runs:
 
 | Circuit | Qubits | Depth | Gates | Multi-Q | Het | Technique / Config | Time | Memory |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Bell state | 2 | 3 | 2 | 1 | 0.00 | `LinearFactory + fold_global` | 0.070 ms | 9.4 KB |
-| Bell (PEC) | 2 | 3 | 2 | 1 | 0.00 | `PEC` | 0.068 ms | 9.4 KB |
-| GHZ-5 | 5 | 6 | 5 | 4 | 0.50 | `LinearFactory + fold_global` | 0.112 ms | 15.2 KB |
-| GHZ-10 | 10 | 11 | 10 | 9 | 0.50 | `LinearFactory + fold_global` | 0.198 ms | 24.9 KB |
-| Random 10q, 3 layers | 10 | 7 | 45 | 15 | 0.83 | `LinearFactory + fold_global` | 0.299 ms | 21.2 KB |
-| Random 20q, 6 layers | 20 | 13 | 180 | 60 | 0.91 | `PolyFactory + fold_gates_at_random` | 0.842 ms | 40.4 KB |
-| VQE 10q, 4 layers | 10 | 20 | 76 | 36 | 1.50 | `PolyFactory + fold_gates_at_random` | 0.491 ms | 43.8 KB |
-| Hetero 4q, 8 layers | 4 | 17 | 42 | 10 | 1.00 | `LinearFactory + fold_global` | 0.298 ms | 34.6 KB |
-| Random 30q, 10 layers | 30 | 21 | 450 | 150 | 0.94 | `PolyFactory + fold_gates_at_random` | 1.94 ms | 69.6 KB |
-| Random 50q, 15 layers | 50 | 31 | 1125 | 375 | 0.96 | `PolyFactory + fold_gates_at_random` | 4.73 ms | 124.6 KB |
+|---|---|---|---|---|---|---|---|---|
+| Bell state | 2 | 3 | 2 | 1 | 0.00 | `LinearFactory` + fold_global | 0.069 ms | 9.4 KB |
+| Bell state (PEC) | 2 | 3 | 2 | 1 | 0.00 | PEC | 0.068 ms | 9.4 KB |
+| GHZ-5 | 5 | 6 | 5 | 4 | 0.50 | `LinearFactory` + fold_global | 0.114 ms | 15.2 KB |
+| GHZ-10 | 10 | 11 | 10 | 9 | 0.50 | `LinearFactory` + fold_global | 0.193 ms | 24.9 KB |
+| Random 10q, 3 layers | 10 | 7 | 45 | 15 | 0.83 | `LinearFactory` + fold_global | 0.296 ms | 21.2 KB |
+| VQE 10q, 4 layers | 10 | 20 | 76 | 36 | 1.50 | `PolyFactory` + fold_gates_at_random | 0.492 ms | 43.8 KB |
+| Random 20q, 6 layers | 20 | 13 | 180 | 60 | 0.91 | `PolyFactory` + fold_gates_at_random | 0.836 ms | 40.4 KB |
+| Random 30q, 10 layers | 30 | 21 | 450 | 150 | 0.94 | `PolyFactory` + fold_gates_at_random | 1.917 ms | 69.6 KB |
+| Random 50q, 15 layers | 50 | 31 | 1125 | 375 | 0.96 | `PolyFactory` + fold_gates_at_random | 4.518 ms | 124.6 KB |
 
-A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe in under 5 ms with ~125 KB memory overhead. The layer heterogeneity computation (DAG conversion) accounts for the increase from v0.1.x timings.
+A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe in under 5 ms with ~125 KB memory overhead.
 
 ### ZNE Fidelity
 
-ZNE end-to-end on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate depolarizing noise), comparing `<Z_0>` expectation value:
+End-to-end ZNE on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate depolarizing noise), comparing the ⟨Z⟩ expectation value on qubit 0:
 
-| Circuit | Qubits | Depth | Noise | Config | Ideal | Noisy | Mitigated | Error Reduction |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| X-flip, 2q | 2 | 3 | p=0.01 | `LinearFactory + fold_global` | -1.0000 | -0.9761 | -1.0003 | **77x** |
-| X-flip, 3q | 3 | 4 | p=0.01 | `LinearFactory + fold_global` | -1.0000 | -0.9761 | -1.0003 | **77x** |
-| X-flip, 2q | 2 | 3 | p=0.05 | `LinearFactory + fold_global` | -1.0000 | -0.8836 | -0.9906 | **12x** |
-| X-flip, 3q | 3 | 4 | p=0.05 | `LinearFactory + fold_global` | -1.0000 | -0.8836 | -0.9906 | **12x** |
-| VQE 4q, 2 layers | 4 | 8 | p=0.01 | `LinearFactory + fold_global` | 0.0850 | 0.0775 | 0.0794 | **1.4x** |
-| VQE 4q, 4 layers | 4 | 14 | p=0.01 | `LinearFactory + fold_global` | -0.1915 | -0.1766 | -0.1850 | **2.3x** |
-| VQE 4q, 2 layers | 4 | 8 | p=0.05 | `LinearFactory + fold_global` | 0.0850 | 0.0523 | 0.0586 | **1.2x** |
+| Circuit | Qubits | Depth | Noise | Technique / Config | Ideal | Noisy | Mitigated | Error Reduction |
+|---|---|---|---|---|---|---|---|---|
+| X-flip, 2q | 2 | 3 | p=0.01 | `LinearFactory` + fold_global | -1.0000 | -0.9761 | -1.0003 | **77x** |
+| X-flip, 3q | 3 | 4 | p=0.01 | `LinearFactory` + fold_global | -1.0000 | -0.9761 | -1.0003 | **77x** |
+| X-flip, 2q | 2 | 3 | p=0.05 | `LinearFactory` + fold_global | -1.0000 | -0.8836 | -0.9906 | **12x** |
+| X-flip, 3q | 3 | 4 | p=0.05 | `LinearFactory` + fold_global | -1.0000 | -0.8836 | -0.9906 | **12x** |
+| VQE 4q, 2 layers | 4 | 8 | p=0.01 | `LinearFactory` + fold_global | 0.0850 | 0.0775 | 0.0794 | **1.4x** |
+| VQE 4q, 4 layers | 4 | 14 | p=0.01 | `LinearFactory` + fold_global | -0.1915 | -0.1766 | -0.1850 | **2.3x** |
+| VQE 4q, 2 layers | 4 | 8 | p=0.05 | `LinearFactory` + fold_global | 0.0850 | 0.0523 | 0.0586 | **1.2x** |
 
-### PEC vs ZNE Head-to-Head
+### PEC vs ZNE: Head-to-Head
 
-Same circuits, both techniques, at multiple noise levels. PEC uses 1000 samples for benchmark accuracy. Measures both `<Z_0>` and `<Z_0 Z_1>` (multi-qubit observable, more noise-sensitive):
+Same circuits, same noise, both techniques. PEC uses 1000 samples for benchmark accuracy. ZNE is deterministic; PEC results have inherent variance due to stochastic sampling.
 
-| Circuit | Noise | Technique | Ideal | Noisy | Mitigated | Error Reduction |
-| --- | --- | --- | --- | --- | --- | --- |
-| VQE 4q `<Z>` | p=0.01 | ZNE | 0.0850 | 0.0775 | 0.0794 | **1.4x** |
-| VQE 4q `<Z>` | p=0.01 | PEC | 0.0850 | 0.0775 | 0.0870 | **3.6x** |
-| VQE 4q `<Z>` | p=0.03 | ZNE | 0.0850 | 0.0640 | 0.0687 | **1.3x** |
-| VQE 4q `<Z>` | p=0.03 | PEC | 0.0850 | 0.0640 | 0.0990 | **1.5x** |
-| VQE 4q `<Z>` | p=0.05 | ZNE | 0.0850 | 0.0523 | 0.0586 | **1.2x** |
-| VQE 4q `<Z>` | p=0.05 | PEC | 0.0850 | 0.0523 | 0.0901 | **6.3x** |
-| VQE 4q `<ZZ>` | p=0.01 | ZNE | 0.1536 | 0.1413 | 0.1514 | **5.7x** |
-| VQE 4q `<ZZ>` | p=0.01 | PEC | 0.1536 | 0.1413 | 0.1579 | **2.8x** |
-| VQE 4q `<ZZ>` | p=0.03 | ZNE | 0.1536 | 0.1193 | 0.1433 | **3.4x** |
-| VQE 4q `<ZZ>` | p=0.03 | PEC | 0.1536 | 0.1193 | 0.1635 | **3.5x** |
-| VQE 4q `<ZZ>` | p=0.05 | ZNE | 0.1536 | 0.1003 | 0.1320 | **2.5x** |
-| VQE 4q `<ZZ>` | p=0.05 | PEC | 0.1536 | 0.1003 | 0.2045 | **1.1x** |
-| X-flip 3q `<Z>` | p=0.03 | ZNE | -1.0000 | -0.9293 | -0.9976 | **28.9x** |
-| X-flip 3q `<Z>` | p=0.03 | PEC | -1.0000 | -0.9293 | -0.9608 | **1.8x** |
+**Single-qubit observable ⟨Z⟩:**
 
-PEC outperforms ZNE on the `<Z>` single-qubit observable at higher noise (6.3x vs 1.2x at p=0.05). On the `<ZZ>` multi-qubit observable, both techniques are competitive at moderate noise. ZNE excels on structured circuits like X-flip where the extrapolation model fits well. PEC's advantage grows with noise but its variance increases with sample count constraints.
+| Circuit | Noise | ZNE Error | ZNE Reduction | PEC Error | PEC Reduction | Better |
+|---|---|---|---|---|---|---|
+| VQE 4q, 2 layers | p=0.01 | 0.0055 | 1.4x | 0.0007 | **10.4x** | PEC |
+| VQE 4q, 2 layers | p=0.03 | 0.0162 | 1.3x | 0.0138 | **1.5x** | PEC |
+| VQE 4q, 2 layers | p=0.05 | 0.0264 | 1.2x | 0.0176 | **1.9x** | PEC |
+| X-flip, 3q | p=0.03 | 0.0024 | **28.9x** | 0.0245 | 2.9x | ZNE |
 
-### Layerwise vs Global Folding
+**Multi-qubit observable ⟨ZZ⟩:**
 
-Compares `fold_global` and `fold_gates_at_random` on 10-qubit circuits with layer heterogeneity > 2.0, using RichardsonFactory with scale factors [1.0, 1.5, 2.0, 2.5]:
+| Circuit | Noise | ZNE Error | ZNE Reduction | PEC Error | PEC Reduction | Better |
+|---|---|---|---|---|---|---|
+| VQE 4q, 2 layers | p=0.01 | 0.0021 | **5.7x** | 0.0064 | 1.9x | ZNE |
+| VQE 4q, 2 layers | p=0.03 | 0.0102 | **3.4x** | 0.0173 | 2.0x | ZNE |
+| VQE 4q, 2 layers | p=0.05 | 0.0216 | 2.5x | 0.0147 | **3.6x** | PEC |
+
+The pattern: ZNE excels on structured circuits where the noise-vs-scale relationship is predictable (X-flip: 28.9x). PEC excels on irregular circuits at higher noise levels, where ZNE's extrapolation assumptions start to break down. On multi-qubit observables, PEC overtakes ZNE as noise increases -- at p=0.05, PEC achieves 3.6x vs ZNE's 2.5x on ⟨ZZ⟩. This is the tradeoff EMRG's heuristic engine navigates: it recommends PEC for shallow, noisy circuits where a noise model is available, and ZNE elsewhere.
+
+### Layerwise Folding
+
+EMRG supports layerwise folding (`fold_gates_at_random`) as an alternative to global folding for circuits with heterogeneous layer structure. This feature is in active development -- current benchmarks show mixed results, and the heuristic thresholds are being refined.
 
 | Circuit | Qubits | Depth | Het | Noise | Global | Layerwise | Winner |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| VQE 10q (3 reps) | 10 | 13 | 2.50 | p=0.01 | 0.9x | 0.3x | global |
-| VQE 10q (3 reps) | 10 | 13 | 2.50 | p=0.03 | 1.1x | 0.1x | global |
-| QAOA 10q | 10 | 14 | 2.50 | p=0.01 | 4.2x | 0.1x | global |
-| QAOA 10q | 10 | 14 | 2.50 | p=0.03 | 5.9x | 0.2x | global |
-| Extreme 10q | 10 | 13 | 2.50 | p=0.01 | 0.5x | 0.1x | global |
+|---|---|---|---|---|---|---|---|
+| VQE 10q, 3 reps | 10 | 13 | 2.50 | p=0.01 | 0.9x | **12.6x** | layerwise |
+| VQE 10q, 3 reps | 10 | 13 | 2.50 | p=0.03 | 1.1x | 1.1x | -- |
+| QAOA 10q | 10 | 14 | 2.50 | p=0.01 | **4.2x** | 0.2x | global |
+| QAOA 10q | 10 | 14 | 2.50 | p=0.03 | **5.9x** | 0.7x | global |
+| Extreme 10q | 10 | 13 | 2.50 | p=0.01 | 0.5x | 0.4x | -- |
 | Extreme 10q | 10 | 13 | 2.50 | p=0.03 | 0.5x | 0.1x | global |
 
-On these 10-qubit circuits, `fold_global` consistently outperforms `fold_gates_at_random`. The `fold_gates_at_random` scaling introduces stochastic variation that hurts Richardson extrapolation at this scale. This is consistent with the literature finding that random folding's advantage is most pronounced on deeper circuits with more gates where coherent error buildup is the dominant concern (arXiv:2005.10921). EMRG's 2.0 heterogeneity threshold is conservative by design.
+At this scale, `fold_global` is generally more reliable because `fold_gates_at_random` introduces stochastic variation into the extrapolation fit. Layerwise folding shows occasional strong results (12.6x on VQE at low noise) but is not yet consistent enough to be the default. EMRG currently defaults to `fold_global` for most circuits and recommends layerwise folding conservatively. Improvements to the layerwise heuristic -- including noise-aware layer selection and deterministic layer folding strategies -- are planned for future releases.
 
 ### Reproduce
-
-```bash
+```
 pip install -e ".[dev]" qiskit-aer
 python benchmarks/run_benchmark.py
 ```
