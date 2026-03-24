@@ -182,6 +182,15 @@ def _render_execution(
             "the base shot count."
         )
 
+    if (
+        recipe.scaling_method == "fold_gates_at_random"
+        and recipe.factory_name == "RichardsonFactory"
+    ):
+        lines.append(
+            "# fold_gates_at_random selected: circuit layers have "
+            "uneven noise density."
+        )
+
     lines.extend(
         [
             "mitigated_value = execute_with_zne(",
