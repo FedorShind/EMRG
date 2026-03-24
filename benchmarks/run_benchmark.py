@@ -254,40 +254,67 @@ class FidelityResult:
     improvement_factor: float
 
 
-def _make_cirq_executor(noise_level: float = 0.0):
-    """Return a Cirq-based ``<Z_0>`` executor for use with Mitiq.
+def _make_noisy_cirq_circuit(circuit, noise_level: float):
+    """Apply per-gate depolarizing noise to a Cirq circuit."""
+    import cirq
 
-    The executor computes the exact expectation value via density-matrix
-    simulation (no shot noise), which eliminates statistical fluctuations
-    and makes fidelity comparisons clean and reproducible.
+    if noise_level <= 0:
+        return circuit
+    noisy = cirq.Circuit()
+    for moment in circuit.moments:
+        noisy.append(moment)
+        for op in moment.operations:
+            nq = len(op.qubits)
+            noisy.append(
+                cirq.depolarize(p=noise_level, n_qubits=nq).on(*op.qubits)
+            )
+    return noisy
+
+
+def _compute_expectation(rho, observable: np.ndarray) -> float:
+    """Tr(rho @ observable)."""
+    return float(np.real(np.trace(rho @ observable)))
+
+
+def _z_observable(n_qubits: int) -> np.ndarray:
+    """Build Z_0 = Z (x) I (x) I (x) ..."""
+    z = np.array([[1, 0], [0, -1]], dtype=complex)
+    obs = z
+    for _ in range(n_qubits - 1):
+        obs = np.kron(obs, np.eye(2, dtype=complex))
+    return obs
+
+
+def _zz_observable(n_qubits: int) -> np.ndarray:
+    """Build Z_0 Z_1 = Z (x) Z (x) I (x) ..."""
+    z = np.array([[1, 0], [0, -1]], dtype=complex)
+    obs = np.kron(z, z)
+    for _ in range(n_qubits - 2):
+        obs = np.kron(obs, np.eye(2, dtype=complex))
+    return obs
+
+
+def _make_cirq_executor(noise_level: float = 0.0, observable: str = "Z"):
+    """Return a Cirq-based executor for use with Mitiq.
+
+    Parameters
+    ----------
+    noise_level:
+        Per-gate depolarizing probability.
+    observable:
+        ``"Z"`` for ``<Z_0>`` or ``"ZZ"`` for ``<Z_0 Z_1>``.
     """
     import cirq
 
     def executor(circuit) -> float:
-        if noise_level > 0:
-            noisy = cirq.Circuit()
-            for moment in circuit.moments:
-                noisy.append(moment)
-                for op in moment.operations:
-                    nq = len(op.qubits)
-                    noisy.append(
-                        cirq.depolarize(p=noise_level, n_qubits=nq)
-                        .on(*op.qubits)
-                    )
-            sim_circuit = noisy
-        else:
-            sim_circuit = circuit
-
+        sim_circuit = _make_noisy_cirq_circuit(circuit, noise_level)
         rho = cirq.DensityMatrixSimulator().simulate(sim_circuit).final_density_matrix
-
-        # <Z_0> = Tr(rho * (Z (x) I (x) ...))
         n = len(sorted(circuit.all_qubits()))
-        z = np.array([[1, 0], [0, -1]], dtype=complex)
-        observable = z
-        for _ in range(n - 1):
-            observable = np.kron(observable, np.eye(2, dtype=complex))
-
-        return float(np.real(np.trace(rho @ observable)))
+        if observable == "ZZ":
+            obs = _zz_observable(n)
+        else:
+            obs = _z_observable(n)
+        return _compute_expectation(rho, obs)
 
     return executor
 
@@ -310,8 +337,9 @@ def benchmark_zne_fidelity(
     name: str,
     noise_level: float,
     noise_label: str,
+    observable: str = "Z",
 ) -> FidelityResult:
-    """Compare ideal / noisy / EMRG-mitigated ``<Z_0>`` using ZNE."""
+    """Compare ideal / noisy / EMRG-mitigated expectation using ZNE."""
     from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
     from mitiq.zne import execute_with_zne
     from mitiq.zne.inference import LinearFactory, PolyFactory, RichardsonFactory
@@ -321,8 +349,8 @@ def benchmark_zne_fidelity(
     gate_only.remove_final_measurements()
     cirq_circuit = from_qiskit(gate_only)
 
-    ideal_value = _make_cirq_executor(noise_level=0.0)(cirq_circuit)
-    noisy_exec = _make_cirq_executor(noise_level=noise_level)
+    ideal_value = _make_cirq_executor(0.0, observable)(cirq_circuit)
+    noisy_exec = _make_cirq_executor(noise_level, observable)
     noisy_value = noisy_exec(cirq_circuit)
 
     recipe = generate_recipe(circuit).recipe
@@ -373,8 +401,13 @@ def benchmark_pec_fidelity(
     name: str,
     noise_level: float,
     noise_label: str,
+    observable: str = "Z",
 ) -> FidelityResult:
-    """Compare ideal / noisy / PEC-mitigated ``<Z_0>``."""
+    """Compare ideal / noisy / PEC-mitigated expectation value.
+
+    Uses 1000 PEC samples for benchmark accuracy.  Real usage may use
+    fewer samples (100-500) for speed at the cost of higher variance.
+    """
     from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
     from mitiq.pec import execute_with_pec
     from mitiq.pec.representations.depolarizing import (
@@ -385,20 +418,20 @@ def benchmark_pec_fidelity(
     gate_only.remove_final_measurements()
     cirq_circuit = from_qiskit(gate_only)
 
-    ideal_value = _make_cirq_executor(noise_level=0.0)(cirq_circuit)
-    noisy_exec = _make_cirq_executor(noise_level=noise_level)
+    ideal_value = _make_cirq_executor(0.0, observable)(cirq_circuit)
+    noisy_exec = _make_cirq_executor(noise_level, observable)
     noisy_value = noisy_exec(cirq_circuit)
 
-    # Build quasi-probability representations for PEC.
     representations = represent_operations_in_circuit_with_local_depolarizing_noise(
         cirq_circuit, noise_level=noise_level,
     )
 
+    # 1000 samples for benchmark accuracy; real usage may use fewer.
     mitigated_value = execute_with_pec(
         cirq_circuit,
         noisy_exec,
         representations=representations,
-        num_samples=200,
+        num_samples=1000,
         random_state=42,
     )
 
@@ -444,6 +477,99 @@ class LayerwiseResult:
     layerwise_wins: bool
 
 
+def make_layerwise_vqe(n_reps: int) -> QuantumCircuit:
+    """10-qubit VQE-style circuit with alternating heavy and light CX layers.
+
+    Heavy layers: 5 parallel CX on disjoint qubit pairs.
+    Light layers: 1 CX on qubits (0, 1).
+    RY rotations between layers force DAG layer separation.
+    Produces layer_heterogeneity = 2.5.
+    """
+    rng = np.random.default_rng(42)
+    qc = QuantumCircuit(10)
+    for _ in range(n_reps):
+        # Heavy: 5 parallel CX
+        qc.cx(0, 1)
+        qc.cx(2, 3)
+        qc.cx(4, 5)
+        qc.cx(6, 7)
+        qc.cx(8, 9)
+        # Rotation layer (forces DAG separation)
+        for q in range(10):
+            qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+        # Light: 1 CX
+        qc.cx(0, 1)
+        # Rotation layer
+        for q in range(10):
+            qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+    qc.measure_all()
+    return qc
+
+
+def make_layerwise_qaoa() -> QuantumCircuit:
+    """10-qubit QAOA-style circuit with heterogeneous layer structure.
+
+    Cost layers: 5 parallel RZZ gates on disjoint pairs.
+    Mixer layers: RX on each qubit + 1 CX (forces light MQ layer).
+    3 repetitions.
+    """
+    rng = np.random.default_rng(99)
+    qc = QuantumCircuit(10)
+    # Initial superposition
+    for q in range(10):
+        qc.h(q)
+    for _ in range(3):
+        # Cost layer: 5 parallel RZZ
+        gamma = float(rng.uniform(0, 2 * np.pi))
+        qc.rzz(gamma, 0, 1)
+        qc.rzz(gamma, 2, 3)
+        qc.rzz(gamma, 4, 5)
+        qc.rzz(gamma, 6, 7)
+        qc.rzz(gamma, 8, 9)
+        # Mixer layer: RX + 1 CX to create a light MQ layer
+        beta = float(rng.uniform(0, 2 * np.pi))
+        for q in range(10):
+            qc.rx(beta, q)
+        qc.cx(0, 1)  # Light MQ layer
+        for q in range(10):
+            qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+    qc.measure_all()
+    return qc
+
+
+def make_layerwise_extreme() -> QuantumCircuit:
+    """10-qubit circuit with extreme layer heterogeneity.
+
+    One heavy block of 5 parallel CX, then 4 rounds of single-CX +
+    rotation layers.  Creates high max/min ratio in MQ gate counts.
+    """
+    rng = np.random.default_rng(55)
+    qc = QuantumCircuit(10)
+    # Heavy block: 5 parallel CX
+    qc.cx(0, 1)
+    qc.cx(2, 3)
+    qc.cx(4, 5)
+    qc.cx(6, 7)
+    qc.cx(8, 9)
+    for q in range(10):
+        qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+    # Light rounds
+    for _ in range(4):
+        qc.cx(0, 1)
+        for q in range(10):
+            qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+    # One more heavy block
+    qc.cx(0, 1)
+    qc.cx(2, 3)
+    qc.cx(4, 5)
+    qc.cx(6, 7)
+    qc.cx(8, 9)
+    for q in range(10):
+        qc.ry(float(rng.uniform(0, 2 * np.pi)), q)
+    qc.measure_all()
+    return qc
+
+
 def benchmark_layerwise(
     circuit: QuantumCircuit,
     name: str,
@@ -460,8 +586,8 @@ def benchmark_layerwise(
     gate_only.remove_final_measurements()
     cirq_circuit = from_qiskit(gate_only)
 
-    ideal_value = _make_cirq_executor(noise_level=0.0)(cirq_circuit)
-    noisy_exec = _make_cirq_executor(noise_level=noise_level)
+    ideal_value = _make_cirq_executor(0.0)(cirq_circuit)
+    noisy_exec = _make_cirq_executor(noise_level)
     noisy_value = noisy_exec(cirq_circuit)
 
     global_value = execute_with_zne(
@@ -588,28 +714,46 @@ def main() -> None:
     _print_fidelity_table(zne_results)
 
     # -------------------------------------------------------------------
-    # Part 3: PEC Fidelity Benchmark
+    # Part 3: PEC vs ZNE Head-to-Head
     # -------------------------------------------------------------------
     print("=" * 78)
-    print("PART 3: PEC Fidelity (ideal vs noisy vs PEC-mitigated)")
+    print("PART 3: PEC vs ZNE Head-to-Head (same circuits, both techniques)")
     print("=" * 78)
     print()
+    print("  PEC uses 1000 samples for benchmark accuracy.")
+    print("  Real usage may use fewer (100-500) for speed.")
+    print()
 
-    pec_tests = [
-        ("Bell (PEC)",      make_bell(), 0.01),
-        ("GHZ-3 (PEC)",     make_ghz(3), 0.01),
-        ("VQE 4q 2L (PEC)", make_hardware_efficient_ansatz(4, 2), 0.01),
+    vqe_4q = make_hardware_efficient_ansatz(4, 2)
+    x3q = make_x_circuit(3)
+
+    # (name, circuit, noise_p, observable)
+    h2h_tests: list[tuple[str, QuantumCircuit, float, str]] = [
+        ("VQE 4q <Z>",    vqe_4q, 0.01, "Z"),
+        ("VQE 4q <Z>",    vqe_4q, 0.03, "Z"),
+        ("VQE 4q <Z>",    vqe_4q, 0.05, "Z"),
+        ("VQE 4q <ZZ>",   vqe_4q, 0.01, "ZZ"),
+        ("VQE 4q <ZZ>",   vqe_4q, 0.03, "ZZ"),
+        ("VQE 4q <ZZ>",   vqe_4q, 0.05, "ZZ"),
+        ("X-flip 3q <Z>", x3q,    0.03, "Z"),
     ]
 
-    pec_results: list[FidelityResult] = []
-    for name, circ, noise_p in pec_tests:
-        print(f"  {name} ...", end=" ", flush=True)
-        r = benchmark_pec_fidelity(circ, name, noise_p, f"depol p={noise_p}")
-        pec_results.append(r)
-        print(f"{r.improvement_factor:.1f}x improvement")
+    h2h_results: list[FidelityResult] = []
+    for name, circ, noise_p, obs in h2h_tests:
+        label = f"depol p={noise_p}"
+        # ZNE
+        print(f"  {name} p={noise_p} ZNE ...", end=" ", flush=True)
+        r_zne = benchmark_zne_fidelity(circ, name, noise_p, label, obs)
+        h2h_results.append(r_zne)
+        print(f"{r_zne.improvement_factor:.1f}x")
+        # PEC
+        print(f"  {name} p={noise_p} PEC ...", end=" ", flush=True)
+        r_pec = benchmark_pec_fidelity(circ, name, noise_p, label, obs)
+        h2h_results.append(r_pec)
+        print(f"{r_pec.improvement_factor:.1f}x")
 
     print()
-    _print_fidelity_table(pec_results)
+    _print_fidelity_table(h2h_results)
 
     # -------------------------------------------------------------------
     # Part 4: Layerwise vs Global Folding
@@ -619,15 +763,33 @@ def main() -> None:
     print("=" * 78)
     print()
 
+    lw_vqe = make_layerwise_vqe(3)
+    lw_qaoa = make_layerwise_qaoa()
+    lw_extreme = make_layerwise_extreme()
+
+    # Print heterogeneity values first
+    for label, circ in [
+        ("VQE 10q (3 reps)", lw_vqe),
+        ("QAOA 10q", lw_qaoa),
+        ("Extreme 10q", lw_extreme),
+    ]:
+        f = analyze_circuit(circ)
+        print(f"  {label}: het={f.layer_heterogeneity:.2f}, "
+              f"depth={f.depth}, MQ={f.multi_qubit_gate_count}")
+    print()
+
     layerwise_tests = [
-        ("Hetero 4q (6L)",  make_heterogeneous_circuit(4, 6), 0.01),
-        ("Hetero 4q (8L)",  make_heterogeneous_circuit(4, 8), 0.01),
-        ("Hetero 4q (6L, noisy)", make_heterogeneous_circuit(4, 6), 0.05),
+        ("VQE 10q (3 reps)",    lw_vqe,     0.01),
+        ("VQE 10q (3 reps)",    lw_vqe,     0.03),
+        ("QAOA 10q",            lw_qaoa,    0.01),
+        ("QAOA 10q",            lw_qaoa,    0.03),
+        ("Extreme 10q",         lw_extreme, 0.01),
+        ("Extreme 10q",         lw_extreme, 0.03),
     ]
 
     layerwise_results: list[LayerwiseResult] = []
     for name, circ, noise_p in layerwise_tests:
-        print(f"  {name} ...", end=" ", flush=True)
+        print(f"  {name} p={noise_p} ...", end=" ", flush=True)
         r = benchmark_layerwise(circ, name, noise_p, f"depol p={noise_p}")
         layerwise_results.append(r)
         winner = "layerwise" if r.layerwise_wins else "global"
@@ -667,7 +829,7 @@ def main() -> None:
         },
         "performance": [asdict(r) for r in perf_results],
         "zne_fidelity": [asdict(r) for r in zne_results],
-        "pec_fidelity": [asdict(r) for r in pec_results],
+        "pec_vs_zne": [asdict(r) for r in h2h_results],
         "layerwise_comparison": [asdict(r) for r in layerwise_results],
     }
 
