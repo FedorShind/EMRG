@@ -231,11 +231,11 @@ Expand beyond ZNE so EMRG can recommend the right technique, not just the right 
 - [x] `--technique` override and `--noise-model` CLI flags
 - [x] 215+ tests, 99% coverage, zero lint warnings
 - [ ] Clifford Data Regression (CDR) support
-- [ ] Layerwise Richardson integration
+- [x] Layerwise Richardson integration
 - [ ] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] `--preview` mode (noisy simulation + fidelity plots)
 - [ ] Real hardware benchmarks (IBM Quantum devices)
-- [ ] Expanded tutorials (VQE for H₂, QAOA on MaxCut, random circuits)
+- [x] Expanded tutorials (VQE for H₂, QAOA on MaxCut, random circuits)
 
 ### Phase 3 -- Multi-framework and community
 
