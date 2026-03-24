@@ -162,42 +162,66 @@ EMRG/
 
 ## Benchmarks
 
-Real measurements from EMRG v0.1.x (ZNE path), collected automatically by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py).
+Real measurements from EMRG v0.2.5, collected automatically by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py).
 
 > **Environment:** Python 3.12, Windows 11 | Qiskit 2.3.0, Mitiq 0.48.1
 
 ### Tool Performance
 
-EMRG relies on pure Qiskit introspection (no simulation), so `generate_recipe()` completes in sub-millisecond time even for large circuits. Median of 100 runs:
+EMRG relies on pure Qiskit introspection (no simulation), so `generate_recipe()` completes in sub-millisecond time even for large circuits. v0.2.5 adds layer heterogeneity analysis via DAG conversion, which adds minor overhead. Median of 100 runs:
 
-| Circuit | Qubits | Depth | Gates | Multi-Q | Factory | Time | Memory |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Bell state | 2 | 3 | 2 | 1 | `LinearFactory` | 0.033 ms | 3.8 KB |
-| GHZ-5 | 5 | 6 | 5 | 4 | `LinearFactory` | 0.047 ms | 3.8 KB |
-| GHZ-10 | 10 | 11 | 10 | 9 | `LinearFactory` | 0.069 ms | 3.8 KB |
-| Random 10q, 3 layers | 10 | 7 | 45 | 15 | `LinearFactory` | 0.159 ms | 4.1 KB |
-| VQE 10q, 4 layers | 10 | 20 | 76 | 36 | `PolyFactory` | 0.234 ms | 3.9 KB |
-| Random 20q, 6 layers | 20 | 13 | 180 | 60 | `PolyFactory` | 0.478 ms | 6.2 KB |
-| Random 30q, 10 layers | 30 | 21 | 450 | 150 | `PolyFactory` | 1.10 ms | 7.9 KB |
-| Random 50q, 15 layers | 50 | 31 | 1125 | 375 | `PolyFactory` | 2.59 ms | 11.1 KB |
+| Circuit | Qubits | Depth | Gates | Multi-Q | Het | Technique / Config | Time | Memory |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Bell state | 2 | 3 | 2 | 1 | 0.00 | `LinearFactory + fold_global` | 0.070 ms | 9.4 KB |
+| Bell (PEC) | 2 | 3 | 2 | 1 | 0.00 | `PEC` | 0.068 ms | 9.4 KB |
+| GHZ-5 | 5 | 6 | 5 | 4 | 0.50 | `LinearFactory + fold_global` | 0.112 ms | 15.2 KB |
+| GHZ-10 | 10 | 11 | 10 | 9 | 0.50 | `LinearFactory + fold_global` | 0.198 ms | 24.9 KB |
+| Random 10q, 3 layers | 10 | 7 | 45 | 15 | 0.83 | `LinearFactory + fold_global` | 0.299 ms | 21.2 KB |
+| Random 20q, 6 layers | 20 | 13 | 180 | 60 | 0.91 | `PolyFactory + fold_gates_at_random` | 0.842 ms | 40.4 KB |
+| VQE 10q, 4 layers | 10 | 20 | 76 | 36 | 1.50 | `PolyFactory + fold_gates_at_random` | 0.491 ms | 43.8 KB |
+| Hetero 4q, 8 layers | 4 | 17 | 42 | 10 | 1.00 | `LinearFactory + fold_global` | 0.298 ms | 34.6 KB |
+| Random 30q, 10 layers | 30 | 21 | 450 | 150 | 0.94 | `PolyFactory + fold_gates_at_random` | 1.94 ms | 69.6 KB |
+| Random 50q, 15 layers | 50 | 31 | 1125 | 375 | 0.96 | `PolyFactory + fold_gates_at_random` | 4.73 ms | 124.6 KB |
 
-A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe in under 3 ms with ~11 KB memory overhead.
+A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe in under 5 ms with ~125 KB memory overhead. The layer heterogeneity computation (DAG conversion) accounts for the increase from v0.1.x timings.
 
 ### ZNE Fidelity
 
-To validate that EMRG selects effective mitigation parameters, we ran ZNE end-to-end on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate depolarizing noise) and compared the `<Z>` expectation value on qubit 0:
+ZNE end-to-end on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate depolarizing noise), comparing `<Z_0>` expectation value:
 
-| Circuit | Qubits | Depth | Noise | Factory | Ideal | Noisy | Mitigated | Error Reduction |
+| Circuit | Qubits | Depth | Noise | Config | Ideal | Noisy | Mitigated | Error Reduction |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| X-flip, 2q | 2 | 3 | p=0.01 | `LinearFactory` | -1.0000 | -0.9761 | -1.0003 | **77x** |
-| X-flip, 3q | 3 | 4 | p=0.01 | `LinearFactory` | -1.0000 | -0.9761 | -1.0003 | **77x** |
-| X-flip, 2q | 2 | 3 | p=0.05 | `LinearFactory` | -1.0000 | -0.8836 | -0.9906 | **12x** |
-| X-flip, 3q | 3 | 4 | p=0.05 | `LinearFactory` | -1.0000 | -0.8836 | -0.9906 | **12x** |
-| VQE 4q, 2 layers | 4 | 8 | p=0.01 | `LinearFactory` | 0.0850 | 0.0775 | 0.0794 | **1.4x** |
-| VQE 4q, 4 layers | 4 | 14 | p=0.01 | `LinearFactory` | -0.1915 | -0.1766 | -0.1850 | **2.3x** |
-| VQE 4q, 2 layers | 4 | 8 | p=0.05 | `LinearFactory` | 0.0850 | 0.0523 | 0.0586 | **1.2x** |
+| X-flip, 2q | 2 | 3 | p=0.01 | `LinearFactory + fold_global` | -1.0000 | -0.9761 | -1.0003 | **77x** |
+| X-flip, 3q | 3 | 4 | p=0.01 | `LinearFactory + fold_global` | -1.0000 | -0.9761 | -1.0003 | **77x** |
+| X-flip, 2q | 2 | 3 | p=0.05 | `LinearFactory + fold_global` | -1.0000 | -0.8836 | -0.9906 | **12x** |
+| X-flip, 3q | 3 | 4 | p=0.05 | `LinearFactory + fold_global` | -1.0000 | -0.8836 | -0.9906 | **12x** |
+| VQE 4q, 2 layers | 4 | 8 | p=0.01 | `LinearFactory + fold_global` | 0.0850 | 0.0775 | 0.0794 | **1.4x** |
+| VQE 4q, 4 layers | 4 | 14 | p=0.01 | `LinearFactory + fold_global` | -0.1915 | -0.1766 | -0.1850 | **2.3x** |
+| VQE 4q, 2 layers | 4 | 8 | p=0.05 | `LinearFactory + fold_global` | 0.0850 | 0.0523 | 0.0586 | **1.2x** |
 
-EMRG-generated ZNE recipes reduce error across all tested circuits, with improvements from 1.2x on high-noise VQE ansatze up to 77x on structured low-noise circuits.
+### PEC Fidelity
+
+PEC on shallow circuits with depolarizing noise model. Same methodology as ZNE fidelity:
+
+| Circuit | Qubits | Depth | Noise | Config | Ideal | Noisy | Mitigated | Error Reduction |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Bell state | 2 | 3 | p=0.01 | `PEC (depolarizing)` | 0.0000 | 0.0000 | 0.0000 | 1.0x |
+| GHZ-3 | 3 | 4 | p=0.01 | `PEC (depolarizing)` | 0.0000 | 0.0000 | 0.0000 | 1.0x |
+| VQE 4q, 2 layers | 4 | 8 | p=0.01 | `PEC (depolarizing)` | 0.0850 | 0.0775 | 0.0848 | **55x** |
+
+PEC achieves 55x error reduction on VQE 4q (vs ZNE's 1.4x on the same circuit) when a noise model is available. Bell and GHZ show 1.0x because `<Z_0>` is exactly 0 for these symmetric states.
+
+### Layerwise vs Global Folding
+
+Compares `fold_global` and `fold_gates_at_random` on circuits with heterogeneous layer structure using RichardsonFactory:
+
+| Circuit | Qubits | Depth | Het | Noise | Global Improvement | Layerwise Improvement | Winner |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Hetero 4q, 6L | 4 | 13 | 1.00 | p=0.01 | 0.5x | 0.9x | layerwise |
+| Hetero 4q, 8L | 4 | 17 | 1.00 | p=0.01 | 2.1x | 1.0x | global |
+| Hetero 4q, 6L | 4 | 13 | 1.00 | p=0.05 | 1.0x | 0.9x | global |
+
+Results are circuit-dependent. Layerwise folding outperforms global on some circuit structures, while global is more stable on others. EMRG recommends layerwise only when layer heterogeneity exceeds 2.0.
 
 ### Reproduce
 
