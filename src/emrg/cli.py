@@ -103,6 +103,7 @@ def _format_features_table(features: CircuitFeatures) -> str:
         f"  Noise estimate:      {features.estimated_noise_factor}",
         f"  Noise category:      {features.noise_category}",
         f"  PEC overhead est:    {features.pec_overhead_estimate:.2f}",
+        f"  Layer heterogeneity: {features.layer_heterogeneity:.4f}",
         f"  Noise model avail:   {features.noise_model_available}",
     ]
     return "\n".join(lines)
@@ -237,6 +238,7 @@ def analyze(qasm_file: str, json_output: bool) -> None:
             "noise_category": features.noise_category,
             "noise_model_available": features.noise_model_available,
             "pec_overhead_estimate": features.pec_overhead_estimate,
+            "layer_heterogeneity": features.layer_heterogeneity,
         }
         click.echo(json.dumps(data, indent=2))
     else:
