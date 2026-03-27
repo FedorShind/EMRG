@@ -6,7 +6,7 @@
 
 EMRG analyzes your quantum circuit and generates ready-to-run, explained [Mitiq](https://mitiq.readthedocs.io/)-powered error mitigation code. No manual tuning required.
 
-> **Status:** v0.2.0 -- ZNE + PEC support. Actively developed, [grant-funded roadmap](#roadmap) ahead.
+> **Status:** v0.2.5 -- ZNE + PEC support. Actively developed, [grant-funded roadmap](#roadmap) ahead.
 
 ---
 
