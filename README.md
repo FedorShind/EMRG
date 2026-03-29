@@ -6,7 +6,7 @@
 
 EMRG analyzes your quantum circuit and generates ready-to-run, explained [Mitiq](https://mitiq.readthedocs.io/)-powered error mitigation code. No manual tuning required.
 
-> **Status:** v0.2.5 -- ZNE + PEC support. Actively developed.
+> **Status:** v0.2.9 -- ZNE + PEC + Preview. Actively developed, [grant-funded roadmap](#roadmap) ahead.
 
 ---
 
@@ -81,6 +81,15 @@ emrg generate circuit.qasm --technique pec --noise-model
 
 # Force ZNE even when PEC is viable
 emrg generate circuit.qasm --technique zne
+
+# Preview: simulate mitigation before running on hardware
+emrg generate circuit.qasm --preview
+
+# Preview with custom noise level
+emrg generate circuit.qasm --preview --noise-level 0.05
+
+# Preview with PEC
+emrg generate circuit.qasm --preview --technique pec --noise-model
 ```
 
 ### Python API
@@ -107,6 +116,13 @@ result = generate_recipe(qc, explain=True)
 # With PEC (when a noise model is available)
 result = generate_recipe(qc, noise_model_available=True)
 print(result.recipe.technique)  # "pec" for shallow circuits
+
+# Preview: simulate mitigation effect before running on hardware
+result = generate_recipe(qc, preview=True)
+print(result.preview.error_reduction)  # e.g. 77.5
+
+# Preview with custom noise level and observable
+result = generate_recipe(qc, preview=True, noise_level=0.05, observable="ZZ")
 ```
 
 ### Example Output
@@ -143,6 +159,18 @@ mitigated_value = execute_with_zne(
 print(f"Mitigated expectation value: {mitigated_value}")
 ```
 
+## Preview Mode
+
+Preview mode runs a noisy simulation and compares the result with and without EMRG's recommended mitigation. Pass `--preview` to the CLI or `preview=True` to the Python API.
+
+The simulation uses Cirq's `DensityMatrixSimulator` with per-gate depolarizing noise (default p=0.01). It computes ideal, noisy, and mitigated expectation values for a configurable observable (default: Z on qubit 0).
+
+Limitations:
+
+- Density matrix simulation caps at 10 qubits. Larger circuits skip the simulation with a warning.
+- PEC preview uses 200 samples for speed. Results are approximate; variance decreases with more samples.
+- Preview requires `cirq-core`. Install with `pip install emrg[preview]`. The base package works without it.
+
 ## Project Structure
 
 ```
@@ -153,9 +181,10 @@ EMRG/
 │   ├── analyzer.py      # Circuit feature extraction
 │   ├── heuristics.py    # Rule-based decision engine
 │   ├── codegen.py       # Template-based code generation
+│   ├── preview.py       # Simulation preview engine (optional cirq dep)
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 215+ pytest tests, 99% coverage
+├── tests/               # 250+ pytest tests, 99% coverage
 ├── docs/examples/       # Example circuits (Python + QASM)
 └── pyproject.toml       # Package configuration
 ```
@@ -269,7 +298,7 @@ Expand beyond ZNE so EMRG can recommend the right technique, not just the right 
 - [ ] Clifford Data Regression (CDR) support
 - [x] Layerwise Richardson integration
 - [ ] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
-- [ ] `--preview` mode (noisy simulation + fidelity plots)
+- [x] `--preview` mode (noisy simulation comparison)
 - [ ] Real hardware benchmarks (IBM Quantum devices)
 - [x] Expanded tutorials (VQE for H₂, QAOA on MaxCut, random circuits)
 
