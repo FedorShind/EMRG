@@ -40,10 +40,10 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4",
+    "cirq-core>=1.0",
 ]
 preview = [
-    "matplotlib>=3.7",
-    "numpy>=1.24",
+    "cirq-core>=1.0",
 ]
 
 [project.scripts]
