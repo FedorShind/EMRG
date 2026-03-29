@@ -21,13 +21,14 @@ Quick start::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from emrg._version import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
+from emrg.preview import PreviewResult, format_preview, run_preview
 
 if TYPE_CHECKING:
     from qiskit import QuantumCircuit
@@ -41,6 +42,8 @@ __all__ = [
     "recommend",
     "MitigationRecipe",
     "generate_code",
+    "run_preview",
+    "PreviewResult",
 ]
 
 
@@ -65,17 +68,21 @@ class GeneratedRecipe:
         recipe: Mitigation strategy from :func:`recommend`.
 
     ``str(result)`` returns :attr:`code`, so ``print(generate_recipe(qc))``
-    outputs the script directly.
+    outputs the script directly.  When :attr:`preview` is populated,
+    ``str()`` appends the formatted preview comparison.
     """
 
     code: str
     rationale: tuple[str, ...]
     features: CircuitFeatures
     recipe: MitigationRecipe
+    preview: PreviewResult | None = field(default=None)
 
     def __str__(self) -> str:
-        """Return the generated code for convenient printing."""
-        return self.code
+        """Return the generated code, with preview output if present."""
+        if self.preview is None:
+            return self.code
+        return self.code + "\n" + format_preview(self.preview, self.features)
 
 
 def generate_recipe(
@@ -85,6 +92,9 @@ def generate_recipe(
     circuit_name: str = "circuit",
     technique: str | None = None,
     noise_model_available: bool = False,
+    preview: bool = False,
+    noise_level: float = 0.01,
+    observable: str = "Z0",
 ) -> GeneratedRecipe:
     """Analyze a circuit and generate a complete error mitigation recipe.
 
@@ -108,13 +118,24 @@ def generate_recipe(
     noise_model_available:
         Whether a noise model is available for PEC (default ``False``).
         Set to ``True`` to enable PEC consideration.
+    preview:
+        If ``True``, run a noisy simulation to preview the mitigation
+        effect.  Requires ``cirq`` (install with ``pip install
+        emrg[preview]``).  Default ``False``.
+    noise_level:
+        Per-gate depolarizing noise probability for preview simulation
+        (default 0.01).  Only used when *preview* is ``True``.
+    observable:
+        Observable to measure in preview: ``"Z0"``, ``"Z1"``, ..., or
+        ``"ZZ"`` (default ``"Z0"``).  Only used when *preview* is
+        ``True``.
 
     Returns
     -------
     GeneratedRecipe
-        Object with ``.code``, ``.rationale``, ``.features``, and
-        ``.recipe`` attributes.  The recipe may use ZNE or PEC depending
-        on circuit characteristics and the *technique* override.
+        Object with ``.code``, ``.rationale``, ``.features``,
+        ``.recipe``, and ``.preview`` attributes.  When *preview* is
+        ``False``, ``.preview`` is ``None``.
 
     Raises
     ------
@@ -145,9 +166,19 @@ def generate_recipe(
         circuit_name=circuit_name,
         explain=explain,
     )
+
+    preview_result = None
+    if preview:
+        from emrg.preview import run_preview
+
+        preview_result = run_preview(
+            qc, recipe, noise_level=noise_level, observable=observable
+        )
+
     return GeneratedRecipe(
         code=code,
         rationale=recipe.rationale,
         features=features,
         recipe=recipe,
+        preview=preview_result,
     )
