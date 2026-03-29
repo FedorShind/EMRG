@@ -163,6 +163,24 @@ def main(ctx: click.Context) -> None:
     default=False,
     help="Indicate whether a noise model is available (enables PEC).",
 )
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Run a noisy simulation to preview mitigation effectiveness.",
+)
+@click.option(
+    "--noise-level",
+    type=float,
+    default=0.01,
+    show_default=True,
+    help="Per-gate depolarizing noise level (used with --preview).",
+)
+@click.option(
+    "--observable",
+    default="Z0",
+    show_default=True,
+    help='Observable to measure: "Z0", "Z1", ..., or "ZZ" (used with --preview).',
+)
 def generate(
     qasm_file: str,
     explain: bool,
@@ -170,6 +188,9 @@ def generate(
     circuit_name: str,
     technique: str | None,
     noise_model: bool,
+    preview: bool,
+    noise_level: float,
+    observable: str,
 ) -> None:
     """Generate error mitigation code from a QASM circuit.
 
@@ -200,6 +221,20 @@ def generate(
         click.echo(f"Written to {output_path}")
     else:
         click.echo(code)
+
+    if preview:
+        try:
+            from emrg.preview import format_preview, run_preview
+        except ImportError:
+            raise click.ClickException(
+                "Preview requires cirq. Install with: pip install emrg[preview]"
+            ) from None
+
+        result = run_preview(
+            qc, recipe, noise_level=noise_level, observable=observable
+        )
+        click.echo("")
+        click.echo(format_preview(result, features))
 
 
 # ---------------------------------------------------------------------------
