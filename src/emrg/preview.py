@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     import numpy as np
     from qiskit import QuantumCircuit
 
+    from emrg.analyzer import CircuitFeatures
     from emrg.heuristics import MitigationRecipe
 
 __all__ = [
@@ -392,3 +393,104 @@ def run_preview(
             num_qubits=n_qubits,
             warning=f"Simulation failed: {exc}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_observable_label(observable: str) -> str:
+    """Turn 'Z0' into '<Z> on qubit 0', 'ZZ' into '<ZZ> on qubits 0,1'."""
+    obs_upper = observable.upper().strip()
+    if obs_upper == "ZZ":
+        return "<ZZ> on qubits 0,1"
+    if obs_upper.startswith("Z") and len(obs_upper) >= 2:
+        return f"<Z> on qubit {obs_upper[1:]}"
+    return observable
+
+
+def format_preview(
+    result: PreviewResult,
+    features: CircuitFeatures,
+) -> str:
+    """Format a PreviewResult as a box-drawing table for terminal output.
+
+    Parameters
+    ----------
+    result:
+        The preview simulation result.
+    features:
+        Circuit features from ``analyze_circuit()``, used for the
+        header line.
+
+    Returns
+    -------
+    str
+        Formatted multi-line string ready for ``click.echo()`` or
+        ``print()``.
+    """
+    width = 49
+    hline = "\u2500" * width
+
+    top = f"\u250c{hline}\u2510"
+    mid = f"\u251c{hline}\u2524"
+    bot = f"\u2514{hline}\u2518"
+
+    def row(text: str) -> str:
+        return f"\u2502  {text:<{width - 3}}\u2502"
+
+    obs_label = _format_observable_label(result.observable)
+
+    # Technique description.
+    tech_desc = result.technique
+    if result.technique == "ZNE" and features.depth is not None:
+        # Include factory info from features context -- but we only
+        # have the technique string here. Keep it simple.
+        pass
+    if result.technique == "PEC":
+        tech_desc = f"PEC ({PEC_PREVIEW_SAMPLES} samples)"
+
+    lines = [
+        top,
+        row("EMRG Preview -- Simulation Comparison"),
+        mid,
+        row(f"Circuit:    {features.num_qubits} qubits, depth {features.depth}"),
+        row(f"Noise:      depolarizing p={result.noise_level}"),
+        row(f"Observable: {obs_label}"),
+        row(f"Technique:  {tech_desc}"),
+        mid,
+    ]
+
+    if result.ideal_value is not None:
+        lines.append(row(f"Ideal:      {result.ideal_value:+.4f}"))
+        lines.append(
+            row(
+                f"Noisy:      {result.noisy_value:+.4f}"
+                f"  (error: {result.noisy_error:.4f})"
+            )
+        )
+        lines.append(
+            row(
+                f"Mitigated:  {result.mitigated_value:+.4f}"
+                f"  (error: {result.mitigated_error:.4f})"
+            )
+        )
+        lines.append(row(""))
+
+        if result.error_reduction == float("inf"):
+            reduction_str = "inf (mitigated error ~ 0)"
+        else:
+            reduction_str = f"{result.error_reduction:.1f}x"
+        lines.append(row(f"Error reduction: {reduction_str}"))
+    else:
+        lines.append(row("Simulation skipped."))
+        lines.append(row(""))
+
+    lines.append(bot)
+
+    if result.warning:
+        lines.append("")
+        lines.append(f"  Note: {result.warning}")
+
+    return "\n".join(lines)
