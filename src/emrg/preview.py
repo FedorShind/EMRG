@@ -183,7 +183,10 @@ def _make_executor(noise_level: float, observable_matrix, n_qubits: int):
     """Return a Cirq DensityMatrixSimulator executor for Mitiq."""
     import cirq
 
-    def executor(circuit) -> float:
+    # NOTE: no return type annotation here -- Mitiq inspects annotations
+    # at runtime, and `from __future__ import annotations` turns `-> float`
+    # into the string 'float', which Mitiq cannot resolve.
+    def executor(circuit):
         sim_circuit = _make_noisy_cirq_circuit(circuit, noise_level)
         rho = (
             cirq.DensityMatrixSimulator()
@@ -330,20 +333,23 @@ def run_preview(
     try:
         from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
 
-        # Parse observable before simulation so bad input fails fast.
-        obs_matrix = _parse_observable(observable, n_qubits)
-
         # Strip measurements -- Cirq density matrix sim doesn't need them.
         gate_only = qc.copy()
         gate_only.remove_final_measurements()
         cirq_circuit = from_qiskit(gate_only)
 
+        # Use Cirq circuit's actual qubit count for the observable matrix.
+        # Cirq may drop idle qubits during conversion, so this can differ
+        # from qc.num_qubits.
+        cirq_n_qubits = len(sorted(cirq_circuit.all_qubits()))
+        obs_matrix = _parse_observable(observable, cirq_n_qubits)
+
         # Ideal (noiseless) execution.
-        ideal_exec = _make_executor(0.0, obs_matrix, n_qubits)
+        ideal_exec = _make_executor(0.0, obs_matrix, cirq_n_qubits)
         ideal_value = ideal_exec(cirq_circuit)
 
         # Noisy execution.
-        noisy_exec = _make_executor(noise_level, obs_matrix, n_qubits)
+        noisy_exec = _make_executor(noise_level, obs_matrix, cirq_n_qubits)
         noisy_value = noisy_exec(cirq_circuit)
 
         # Mitigated execution using the actual recipe.
