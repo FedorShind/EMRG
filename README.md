@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml/badge.svg)](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml)
 
-## **Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
+**Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
 
 EMRG analyzes your quantum circuit and generates ready-to-run, explained [Mitiq](https://mitiq.readthedocs.io/)-powered error mitigation code. No manual tuning required.
 
-> **Status:** v0.2.9 -- ZNE + PEC + Preview. Actively developed, [grant-funded roadmap](#roadmap) ahead.
+> **Status:** v0.2.9 -- ZNE + PEC + Preview. Actively developed, [roadmap](#roadmap) ahead.
 
 ---
 
@@ -22,21 +22,20 @@ Noise limits every computation on today's hardware. Error mitigation techniques 
 **EMRG handles this automatically.** Give it a circuit, get back optimized mitigation code with clear explanations of *why* each choice was made. EMRG selects between techniques, not just tunes settings.
 
 ## How It Works
-
 ```
 Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] --> Mitigated Code
-                                   ZNE or PEC
+                                       ZNE or PEC
 ```
 
 1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file
-2. **Extract Features** -- Depth, gate counts, multi-qubit gate density, estimated noise factor, PEC overhead
+2. **Extract Features** -- Depth, gate counts, multi-qubit gate density, estimated noise factor, PEC overhead, layer heterogeneity
 3. **Select Technique** -- Choose between ZNE and PEC based on circuit characteristics
 4. **Generate Code** -- Output runnable Python with Mitiq imports, config, and inline rationale
 
 ### Heuristic Rules (v0.2)
 
 | Circuit Profile | Technique | Configuration | Rationale |
-| --- | --- | --- | --- |
+|---|---|---|---|
 | Depth ≤ 30 + noise model + overhead < 1000 | **PEC** | Depolarizing representations | Unbiased error cancellation when overhead is manageable |
 | Depth < 20, low multi-qubit gates | ZNE `LinearFactory` | `[1.0, 1.5, 2.0]` | Conservative for shallow circuits |
 | Depth 20--50 | ZNE `RichardsonFactory` | `[1.0, 1.5, 2.0, 2.5]` | Better extrapolation for moderate noise |
@@ -45,13 +44,16 @@ Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] -->
 ## Quick Start
 
 ### Installation
-
 ```
 pip install emrg
 ```
 
-Or from source:
+For preview mode (noisy simulation comparison):
+```
+pip install emrg[preview]
+```
 
+Or from source:
 ```
 git clone https://github.com/FedorShind/EMRG.git
 cd EMRG
@@ -59,41 +61,33 @@ pip install -e ".[dev]"
 ```
 
 ### CLI Usage
-
-```bash
+```
 # Generate mitigation recipe from a QASM file
-emrg generate docs/examples/bell_state.qasm
+emrg generate circuit.qasm
 
 # With verbose explanation
-emrg generate docs/examples/bell_state.qasm --explain
+emrg generate circuit.qasm --explain
 
 # Save to file
 emrg generate circuit.qasm -o mitigated.py
 
+# Force a specific technique
+emrg generate circuit.qasm --technique pec --noise-model
+
+# Preview: simulate and compare before/after mitigation
+emrg generate circuit.qasm --preview
+
+# Preview with custom noise level and observable
+emrg generate circuit.qasm --preview --noise-level 0.03 --observable ZZ
+
 # Analyze circuit features
-emrg analyze docs/examples/simple_vqe.qasm
+emrg analyze circuit.qasm
 
 # JSON output (for scripting)
 emrg analyze circuit.qasm --json
-
-# Force PEC technique (requires noise model)
-emrg generate circuit.qasm --technique pec --noise-model
-
-# Force ZNE even when PEC is viable
-emrg generate circuit.qasm --technique zne
-
-# Preview: simulate mitigation before running on hardware
-emrg generate circuit.qasm --preview
-
-# Preview with custom noise level
-emrg generate circuit.qasm --preview --noise-level 0.05
-
-# Preview with PEC
-emrg generate circuit.qasm --preview --technique pec --noise-model
 ```
 
 ### Python API
-
 ```python
 from qiskit import QuantumCircuit
 from emrg import generate_recipe
@@ -110,26 +104,18 @@ print(result)             # Ready-to-run Python script
 print(result.rationale)   # Why these parameters were chosen
 print(result.features)    # Circuit analysis details
 
-# With verbose explanations
-result = generate_recipe(qc, explain=True)
-
-# With PEC (when a noise model is available)
+# With PEC (requires noise model availability)
 result = generate_recipe(qc, noise_model_available=True)
-print(result.recipe.technique)  # "pec" for shallow circuits
 
-# Preview: simulate mitigation effect before running on hardware
-result = generate_recipe(qc, preview=True)
-print(result.preview.error_reduction)  # e.g. 77.5
-
-# Preview with custom noise level and observable
-result = generate_recipe(qc, preview=True, noise_level=0.05, observable="ZZ")
+# With preview simulation
+result = generate_recipe(qc, preview=True, noise_level=0.01)
+print(result.preview)     # Simulation comparison results
 ```
 
 ### Example Output
-
-```python
+```
 # =============================================================
-# EMRG v0.2.0 -- Error Mitigation Recipe
+# EMRG v0.2.9 -- Error Mitigation Recipe
 # Circuit: 2 qubits, depth 3, 1 multi-qubit gates
 # Noise estimate: 0.011 (low)
 # =============================================================
@@ -161,18 +147,32 @@ print(f"Mitigated expectation value: {mitigated_value}")
 
 ## Preview Mode
 
-Preview mode runs a noisy simulation and compares the result with and without EMRG's recommended mitigation. Pass `--preview` to the CLI or `preview=True` to the Python API.
+Preview runs a noisy simulation of the circuit, applies EMRG's recommended mitigation, and displays a before/after comparison. This validates the recommendation before using real hardware shots.
+```
+emrg generate circuit.qasm --preview
+```
+```
+┌─────────────────────────────────────────────────┐
+│  EMRG Preview -- Simulation Comparison         │
+├─────────────────────────────────────────────────┤
+│  Circuit:    2 qubits, depth 3                 │
+│  Noise:      depolarizing p=0.01               │
+│  Observable: <Z> on qubit 0                    │
+│  Technique:  ZNE                               │
+├─────────────────────────────────────────────────┤
+│  Ideal:      -1.0000                           │
+│  Noisy:      -0.9761  (error: 0.0239)          │
+│  Mitigated:  -1.0003  (error: 0.0003)          │
+│                                                │
+│  Error reduction: 77.5x                        │
+└─────────────────────────────────────────────────┘
+```
 
-The simulation uses Cirq's `DensityMatrixSimulator` with per-gate depolarizing noise (default p=0.01). It computes ideal, noisy, and mitigated expectation values for a configurable observable (default: Z on qubit 0).
+Preview uses Cirq's `DensityMatrixSimulator` with depolarizing noise. Limitations: circuits above 10 qubits are skipped (density matrix simulation is impractical at that scale). PEC preview uses 200 samples, so results are approximate and will vary between runs.
 
-Limitations:
-
-- Density matrix simulation caps at 10 qubits. Larger circuits skip the simulation with a warning.
-- PEC preview uses 200 samples for speed. Results are approximate; variance decreases with more samples.
-- Preview requires `cirq-core`. Install with `pip install emrg[preview]`. The base package works without it.
+Requires `pip install emrg[preview]` or `pip install cirq-core`.
 
 ## Project Structure
-
 ```
 EMRG/
 ├── src/emrg/
@@ -181,11 +181,14 @@ EMRG/
 │   ├── analyzer.py      # Circuit feature extraction
 │   ├── heuristics.py    # Rule-based decision engine
 │   ├── codegen.py       # Template-based code generation
-│   ├── preview.py       # Simulation preview engine (optional cirq dep)
+│   ├── preview.py       # Simulation preview engine
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 250+ pytest tests, 99% coverage
-├── docs/examples/       # Example circuits (Python + QASM)
+├── tests/               # 319+ tests, 99% coverage
+├── docs/
+│   ├── examples/        # Example circuits (Python + QASM)
+│   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
+├── benchmarks/          # Automated benchmark suite
 └── pyproject.toml       # Package configuration
 ```
 
@@ -284,7 +287,6 @@ Everything needed to go from circuit to mitigation recipe in one command:
 - [x] CLI with `generate` and `analyze` commands
 - [x] Public Python API (`generate_recipe()`)
 - [x] Example circuits (Python + QASM) and documentation
-- [x] 144 tests, 98% coverage, zero lint warnings
 
 ### Phase 2 -- More techniques, better validation (current)
 
@@ -294,19 +296,19 @@ Expand beyond ZNE so EMRG can recommend the right technique, not just the right 
 - [x] Multi-technique selection (ZNE vs PEC)
 - [x] PEC code generation template
 - [x] `--technique` override and `--noise-model` CLI flags
-- [x] 215+ tests, 99% coverage, zero lint warnings
-- [ ] Clifford Data Regression (CDR) support
 - [x] Layerwise Richardson integration
+- [x] `--preview` mode (noisy simulation + before/after comparison)
+- [x] Expanded tutorials (VQE, QAOA)
+- [x] 319+ tests, 99% coverage, zero lint warnings
+- [ ] Clifford Data Regression (CDR) support
 - [ ] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
-- [x] `--preview` mode (noisy simulation comparison)
 - [ ] Real hardware benchmarks (IBM Quantum devices)
-- [x] Expanded tutorials (VQE for H₂, QAOA on MaxCut, random circuits)
 
 ### Phase 3 -- Multi-framework and community
 
 Make EMRG useful regardless of which framework you use:
 
-- [ ] Cirq and PennyLane circuit input support
+- [ ] Cirq, PennyLane, and Amazon Braket input support
 - [ ] Noise model import from Qiskit Aer / real device calibration data
 - [ ] Configurable heuristics via YAML/JSON
 - [ ] Jupyter widget for interactive recipe exploration
@@ -336,6 +338,7 @@ Make EMRG part of the standard quantum development workflow:
 * **Qiskit** >= 1.0 -- Circuit representation and introspection
 * **Mitiq** >= 0.48 -- Error mitigation primitives
 * **Click** >= 8.0 -- CLI framework
+* **Cirq** >= 1.0 -- Simulation backend (optional, for preview mode)
 
 ## Contributing
 
@@ -343,9 +346,8 @@ EMRG is open source and contributions are welcome. If you have ideas, find bugs,
 
 ## License
 
-[MIT](LICENSE) -- Free for academic and commercial use.
+[MIT](LICENSE) -- Free for academic and commercial use. Do whatever you want!
 
 ## Acknowledgments
 
 Built on [Mitiq](https://mitiq.readthedocs.io/) by [Unitary Foundation](https://unitary.foundation/).
-Inspired by the need to make quantum error mitigation accessible to everyone working with NISQ hardware.
