@@ -44,6 +44,7 @@ dev = [
 ]
 preview = [
     "cirq-core>=1.0",
+    "ply",
 ]
 
 [project.scripts]
