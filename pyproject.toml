@@ -45,6 +45,7 @@ dev = [
 preview = [
     "cirq-core>=1.0",
     "ply",
+    "qiskit-aer",
 ]
 
 [project.scripts]
