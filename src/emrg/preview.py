@@ -44,6 +44,16 @@ __all__ = [
 MAX_PREVIEW_QUBITS = 10
 PEC_PREVIEW_SAMPLES = 200
 
+# Gate-count limits for preview simulation, indexed by qubit count.
+# Density-matrix ops scale as O(4^n) per gate, and ZNE folding
+# multiplies gate count by the max scale factor.  These limits keep
+# preview under ~30 s on typical hardware.
+_GATE_LIMITS: dict[int, int] = {
+    8: 60,
+    9: 40,
+    10: 30,
+}
+
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -310,7 +320,9 @@ def run_preview(
     n_qubits = qc.num_qubits
     technique = recipe.technique.upper()
 
-    # Guard: density matrix simulation is impractical above 10 qubits.
+    # Guard: density matrix simulation cost is roughly
+    # O(4^n * total_gates * max_scale_factor).  Cap by qubit count
+    # and by an estimated gate-cost budget for wide circuits.
     if n_qubits > MAX_PREVIEW_QUBITS:
         return PreviewResult(
             ideal_value=None,
@@ -329,6 +341,34 @@ def run_preview(
                 f"circuit). Test on a smaller circuit."
             ),
         )
+
+    gate_limit = _GATE_LIMITS.get(n_qubits)
+    if gate_limit is not None:
+        total_gates = sum(
+            count for name, count in qc.count_ops().items()
+            if name not in ("measure", "barrier", "delay", "reset")
+        )
+        if total_gates > gate_limit:
+            return PreviewResult(
+                ideal_value=None,
+                noisy_value=None,
+                mitigated_value=None,
+                noisy_error=None,
+                mitigated_error=None,
+                error_reduction=None,
+                technique=technique,
+                noise_level=noise_level,
+                observable=observable,
+                num_qubits=n_qubits,
+                warning=(
+                    f"Preview skipped: {total_gates} gates on "
+                    f"{n_qubits} qubits exceeds simulation budget "
+                    f"(limit: {gate_limit} gates). "
+                    f"Density matrix simulation with ZNE folding "
+                    f"would be impractically slow. "
+                    f"Test on a smaller or shallower circuit."
+                ),
+            )
 
     try:
         from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
