@@ -170,10 +170,10 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--noise-level",
-    type=float,
+    type=click.FloatRange(min=0, min_open=True, max=0.5),
     default=0.01,
     show_default=True,
-    help="Per-gate depolarizing noise level (used with --preview).",
+    help="Per-gate depolarizing noise level, 0 < p <= 0.5 (used with --preview).",
 )
 @click.option(
     "--observable",
@@ -223,16 +223,21 @@ def generate(
         click.echo(code)
 
     if preview:
+        from emrg.preview import format_preview, run_preview
+
         try:
-            from emrg.preview import format_preview, run_preview
+            result = run_preview(
+                qc, recipe, noise_level=noise_level, observable=observable,
+            )
         except ImportError:
             raise click.ClickException(
-                "Preview requires cirq. Install with: pip install emrg[preview]"
+                "Preview requires cirq. "
+                "Install with: pip install emrg[preview]"
             ) from None
-
-        result = run_preview(
-            qc, recipe, noise_level=noise_level, observable=observable
-        )
+        except Exception as exc:
+            raise click.ClickException(
+                f"Preview simulation failed: {exc}"
+            ) from exc
         click.echo("")
         click.echo(format_preview(result, features))
 
