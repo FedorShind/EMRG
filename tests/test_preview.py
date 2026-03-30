@@ -27,6 +27,15 @@ from emrg.preview import (
     run_preview,
 )
 
+try:
+    import cirq  # noqa: F401
+
+    HAS_CIRQ = True
+except ImportError:
+    HAS_CIRQ = False
+
+pytestmark = pytest.mark.skipif(not HAS_CIRQ, reason="cirq not installed")
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
