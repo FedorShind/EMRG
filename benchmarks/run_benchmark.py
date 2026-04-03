@@ -1,6 +1,6 @@
 """EMRG Benchmark Suite.
 
-Measures four things:
+Measures five things:
 
 1. **Tool performance** -- wall-clock time and memory overhead of
    ``analyze_circuit()`` / ``generate_recipe()`` across circuits ranging
@@ -18,6 +18,10 @@ Measures four things:
 4. **Layerwise vs global folding** -- compares ``fold_global`` and
    ``fold_gates_at_random`` on circuits with heterogeneous layer structure
    to validate EMRG's layerwise Richardson recommendation.
+
+5. **CDR fidelity** -- end-to-end validation of Clifford Data Regression
+   on circuits with non-Clifford gates (T gates, arbitrary rotations).
+   Compares CDR vs ZNE on the same circuits.
 
 All numbers printed to stdout are real measurements.  A machine-readable
 JSON copy is written to ``benchmarks/results.json``.
@@ -162,6 +166,35 @@ def make_heterogeneous_circuit(
     return qc
 
 
+def make_t_gate_circuit(n_qubits: int) -> QuantumCircuit:
+    """Circuit with T gates and CX chain -- triggers CDR recommendation."""
+    qc = QuantumCircuit(n_qubits)
+    qc.h(0)
+    for q in range(n_qubits):
+        qc.t(q)
+    for q in range(n_qubits - 1):
+        qc.cx(q, q + 1)
+    for q in range(n_qubits):
+        qc.t(q)
+    qc.measure_all()
+    return qc
+
+
+def make_rotation_circuit(
+    n_qubits: int, n_layers: int,
+) -> QuantumCircuit:
+    """Circuit with Rz rotations at non-Clifford angles -- CDR-eligible."""
+    rng = np.random.default_rng(77)
+    qc = QuantumCircuit(n_qubits)
+    for _ in range(n_layers):
+        for q in range(n_qubits):
+            qc.rz(float(rng.uniform(0.1, 1.2)), q)
+        for q in range(n_qubits - 1):
+            qc.cx(q, q + 1)
+    qc.measure_all()
+    return qc
+
+
 # ---------------------------------------------------------------------------
 # Part 1: Tool Performance
 # ---------------------------------------------------------------------------
@@ -216,6 +249,9 @@ def benchmark_performance(
 
     if recipe.technique == "pec":
         config = "PEC"
+    elif recipe.technique == "cdr":
+        num_tc = recipe.factory_kwargs.get("num_training_circuits", "?")
+        config = f"CDR ({num_tc} training)"
     else:
         config = f"{recipe.factory_name} + {recipe.scaling_method}"
 
@@ -353,7 +389,7 @@ def benchmark_zne_fidelity(
     noisy_exec = _make_cirq_executor(noise_level, observable)
     noisy_value = noisy_exec(cirq_circuit)
 
-    recipe = generate_recipe(circuit).recipe
+    recipe = generate_recipe(circuit, technique="zne").recipe
     factory_cls = {
         "LinearFactory": LinearFactory,
         "RichardsonFactory": RichardsonFactory,
@@ -446,6 +482,63 @@ def benchmark_pec_fidelity(
         noise_level=noise_label,
         technique="PEC",
         config="PEC (depolarizing)",
+        ideal_value=round(ideal_value, 4),
+        noisy_value=round(noisy_value, 4),
+        mitigated_value=round(mitigated_value, 4),
+        noisy_error=round(noisy_err, 4),
+        mitigated_error=round(mitigated_err, 4),
+        improvement_factor=round(improvement, 2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Part 5: CDR Fidelity Benchmark
+# ---------------------------------------------------------------------------
+
+def benchmark_cdr_fidelity(
+    circuit: QuantumCircuit,
+    name: str,
+    noise_level: float,
+    noise_label: str,
+    observable: str = "Z",
+    num_training_circuits: int = 10,
+) -> FidelityResult:
+    """Compare ideal / noisy / CDR-mitigated expectation value."""
+    from mitiq.cdr import execute_with_cdr
+    from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
+
+    gate_only = circuit.copy()
+    gate_only.remove_final_measurements()
+    cirq_circuit = from_qiskit(gate_only)
+
+    ideal_exec = _make_cirq_executor(0.0, observable)
+    ideal_value = ideal_exec(cirq_circuit)
+    noisy_exec = _make_cirq_executor(noise_level, observable)
+    noisy_value = noisy_exec(cirq_circuit)
+
+    sim_exec = _make_cirq_executor(0.0, observable)
+
+    mitigated_value = execute_with_cdr(
+        cirq_circuit,
+        noisy_exec,
+        simulator=sim_exec,
+        num_training_circuits=num_training_circuits,
+        seed=42,
+    )
+
+    noisy_err = abs(ideal_value - noisy_value)
+    mitigated_err = abs(ideal_value - mitigated_value)
+    improvement = _compute_improvement(
+        ideal_value, noisy_value, mitigated_value,
+    )
+
+    return FidelityResult(
+        name=name,
+        n_qubits=circuit.num_qubits,
+        depth=circuit.depth(),
+        noise_level=noise_label,
+        technique="CDR",
+        config=f"CDR ({num_training_circuits} training)",
         ideal_value=round(ideal_value, 4),
         noisy_value=round(noisy_value, 4),
         mitigated_value=round(mitigated_value, 4),
@@ -657,6 +750,9 @@ def main() -> None:
         ("Random 20q (6 layers)",  make_random_circuit(20, 6), False),
         ("VQE 10q (4 layers)",     make_hardware_efficient_ansatz(10, 4), False),
         ("Hetero 4q (8 layers)",   make_heterogeneous_circuit(4, 8), False),
+        ("T-gate 4q",             make_t_gate_circuit(4), False),
+        ("Rz-rot 4q (4 layers)",  make_rotation_circuit(4, 4), False),
+        ("Rz-rot 6q (3 layers)",  make_rotation_circuit(6, 3), False),
         ("Random 30q (10 layers)", make_random_circuit(30, 10), False),
         ("Random 50q (15 layers)", make_random_circuit(50, 15), False),
     ]
@@ -817,6 +913,48 @@ def main() -> None:
     print()
 
     # -------------------------------------------------------------------
+    # Part 5: CDR Fidelity
+    # -------------------------------------------------------------------
+    print("=" * 78)
+    print("PART 5: CDR Fidelity (ideal vs noisy vs CDR-mitigated)")
+    print("=" * 78)
+    print()
+
+    cdr_t4 = make_t_gate_circuit(4)
+    cdr_rot4 = make_rotation_circuit(4, 3)
+    cdr_vqe4 = make_hardware_efficient_ansatz(4, 2)
+
+    cdr_tests = [
+        ("T-gate 4q",       cdr_t4,   0.01),
+        ("T-gate 4q",       cdr_t4,   0.03),
+        ("Rz-rot 4q",       cdr_rot4, 0.01),
+        ("Rz-rot 4q",       cdr_rot4, 0.03),
+        ("VQE 4q (2 layers)", cdr_vqe4, 0.01),
+        ("VQE 4q (2 layers)", cdr_vqe4, 0.03),
+    ]
+
+    cdr_results: list[FidelityResult] = []
+    cdr_zne_comparisons: list[FidelityResult] = []
+    for name, circ, noise_p in cdr_tests:
+        label = f"depol p={noise_p}"
+        # CDR
+        print(f"  {name} p={noise_p} CDR ...", end=" ", flush=True)
+        r_cdr = benchmark_cdr_fidelity(
+            circ, name, noise_p, label, num_training_circuits=10,
+        )
+        cdr_results.append(r_cdr)
+        cdr_zne_comparisons.append(r_cdr)
+        print(f"{r_cdr.improvement_factor:.1f}x")
+        # ZNE for comparison
+        print(f"  {name} p={noise_p} ZNE ...", end=" ", flush=True)
+        r_zne = benchmark_zne_fidelity(circ, name, noise_p, label)
+        cdr_zne_comparisons.append(r_zne)
+        print(f"{r_zne.improvement_factor:.1f}x")
+
+    print()
+    _print_fidelity_table(cdr_zne_comparisons)
+
+    # -------------------------------------------------------------------
     # JSON output (machine-readable, gitignored)
     # -------------------------------------------------------------------
     output = {
@@ -831,6 +969,8 @@ def main() -> None:
         "zne_fidelity": [asdict(r) for r in zne_results],
         "pec_vs_zne": [asdict(r) for r in h2h_results],
         "layerwise_comparison": [asdict(r) for r in layerwise_results],
+        "cdr_fidelity": [asdict(r) for r in cdr_results],
+        "cdr_vs_zne": [asdict(r) for r in cdr_zne_comparisons],
     }
 
     _RESULTS_PATH.write_text(json.dumps(output, indent=2), encoding="utf-8")
