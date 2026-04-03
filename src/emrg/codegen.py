@@ -60,7 +60,11 @@ def _render_header(
         + (
             "PEC (Probabilistic Error Cancellation)"
             if recipe.technique == "pec"
-            else f"{recipe.factory_name} + {recipe.scaling_method}"
+            else (
+                "CDR (Clifford Data Regression)"
+                if recipe.technique == "cdr"
+                else f"{recipe.factory_name} + {recipe.scaling_method}"
+            )
         ),
     ]
 
@@ -294,6 +298,162 @@ def _render_pec_execution(
 
 
 # ---------------------------------------------------------------------------
+# CDR renderers
+# ---------------------------------------------------------------------------
+
+
+def _render_cdr_imports() -> str:
+    """Render CDR-specific import statements."""
+    return "\n".join(
+        [
+            "from mitiq.cdr import execute_with_cdr",
+        ]
+    )
+
+
+def _render_cdr_simulator(explain: bool) -> str:
+    """Render the classical simulator function for CDR training circuits."""
+    lines: list[str] = []
+
+    if explain:
+        lines.append(
+            "# CDR needs a classical simulator to evaluate near-Clifford"
+        )
+        lines.append(
+            "# training circuits exactly. Cirq's DensityMatrixSimulator"
+        )
+        lines.append(
+            "# runs these circuits without noise (noiseless reference)."
+        )
+        lines.append(
+            "# Install cirq if needed: pip install emrg[preview]"
+        )
+
+    lines.extend(
+        [
+            "def simulator(circuit):",
+            '    """Simulate a near-Clifford circuit classically (noiseless).',
+            "",
+            "    CDR uses this to get exact expectation values for training",
+            "    circuits where non-Clifford gates have been replaced with",
+            "    Clifford gates.",
+            '    """',
+            "    import cirq",
+            "    rho = (",
+            "        cirq.DensityMatrixSimulator()",
+            "        .simulate(circuit)",
+            "        .final_density_matrix",
+            "    )",
+            "    # Compute expectation value from the density matrix.",
+            "    # Adjust the observable to match your measurement.",
+            "    import numpy as np",
+            "    n = int(np.log2(rho.shape[0]))",
+            "    z = np.array([[1, 0], [0, -1]], dtype=complex)",
+            "    obs = z",
+            "    for _ in range(n - 1):",
+            "        obs = np.kron(obs, np.eye(2, dtype=complex))",
+            "    return float(np.real(np.trace(rho @ obs)))",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+def _render_cdr_setup(
+    recipe: MitigationRecipe,
+    explain: bool,
+) -> str:
+    """Render CDR configuration (num_training_circuits, fit_method)."""
+    num_training = recipe.factory_kwargs.get("num_training_circuits", 8)
+
+    lines: list[str] = []
+    if explain:
+        lines.append(
+            "# CDR creates near-Clifford training circuits by replacing"
+        )
+        lines.append(
+            "# non-Clifford gates with Clifford substitutes. These can be"
+        )
+        lines.append(
+            "# simulated classically and used to fit a regression model"
+        )
+        lines.append(
+            "# that corrects the noisy results on the original circuit."
+        )
+        lines.append("")
+
+    lines.append(f"num_training_circuits = {num_training}")
+
+    return "\n".join(lines)
+
+
+def _render_cdr_execution(
+    recipe: MitigationRecipe,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Render the execute_with_cdr call and result print."""
+    lines: list[str] = []
+
+    if explain:
+        lines.append("# Run Clifford Data Regression.")
+        lines.append(
+            f"# Estimated overhead: ~{recipe.estimated_overhead:.0f}x "
+            "the base shot count (training circuits + original)."
+        )
+
+    lines.extend(
+        [
+            "mitigated_value = execute_with_cdr(",
+            f"    {circuit_name},",
+            "    execute,",
+            "    simulator=simulator,",
+            "    num_training_circuits=num_training_circuits,",
+            ")",
+            "",
+            'print(f"Mitigated expectation value: {mitigated_value}")',
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+def _generate_cdr_code(
+    recipe: MitigationRecipe,
+    features: CircuitFeatures,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Assemble sections for a CDR recipe."""
+    sections = [
+        _render_header(recipe, features, explain),
+        "",
+        _render_cdr_imports(),
+        "",
+        _render_cdr_setup(recipe, explain),
+    ]
+
+    param_warning = _render_parameter_warning(features)
+    if param_warning is not None:
+        sections.append("")
+        sections.append(param_warning)
+
+    sections.extend(
+        [
+            "",
+            _render_executor(explain),
+            "",
+            _render_cdr_simulator(explain),
+            "",
+            _render_cdr_execution(recipe, circuit_name, explain),
+            "",  # trailing newline
+        ]
+    )
+
+    return "\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -356,6 +516,8 @@ def generate_code(
 
     if recipe.technique == "pec":
         return _generate_pec_code(recipe, features, circuit_name, explain)
+    if recipe.technique == "cdr":
+        return _generate_cdr_code(recipe, features, circuit_name, explain)
     return _generate_zne_code(recipe, features, circuit_name, explain)
 
 
