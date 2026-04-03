@@ -35,7 +35,12 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from emrg.analyzer import CircuitFeatures
+from emrg.analyzer import (
+    CDR_MAX_DEPTH,
+    CDR_MIN_DEPTH,
+    CDR_NON_CLIFFORD_FRACTION_THRESHOLD,
+    CircuitFeatures,
+)
 
 __all__ = [
     "MitigationRecipe",
@@ -53,6 +58,11 @@ __all__ = [
     "LAYERWISE_MIN_DEPTH",
     "LAYERWISE_MAX_DEPTH",
     "LAYERWISE_HETEROGENEITY_THRESHOLD",
+    "CDR_TRAINING_CIRCUITS_SMALL",
+    "CDR_TRAINING_CIRCUITS_MEDIUM",
+    "CDR_TRAINING_CIRCUITS_LARGE",
+    "CDR_GATE_THRESHOLD_MEDIUM",
+    "CDR_GATE_THRESHOLD_LARGE",
 ]
 
 # ---------------------------------------------------------------------------
@@ -91,6 +101,23 @@ LAYERWISE_MAX_DEPTH: int = 50
 
 #: Minimum layer heterogeneity (exclusive) to trigger layerwise Richardson.
 LAYERWISE_HETEROGENEITY_THRESHOLD: float = 2.0
+
+# --- CDR (Clifford Data Regression) constants --------------------------------
+
+#: Number of CDR training circuits for small circuits (< 20 gates).
+CDR_TRAINING_CIRCUITS_SMALL: int = 8
+
+#: Number of CDR training circuits for medium circuits (20-50 gates).
+CDR_TRAINING_CIRCUITS_MEDIUM: int = 12
+
+#: Number of CDR training circuits for large circuits (> 50 gates).
+CDR_TRAINING_CIRCUITS_LARGE: int = 16
+
+#: Gate count threshold between small and medium CDR training.
+CDR_GATE_THRESHOLD_MEDIUM: int = 20
+
+#: Gate count threshold between medium and large CDR training.
+CDR_GATE_THRESHOLD_LARGE: int = 50
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -205,6 +232,63 @@ def _build_pec_recipe(features: CircuitFeatures) -> MitigationRecipe:
         ),
         noise_category=features.noise_category,
         estimated_overhead=features.pec_overhead_estimate,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CDR helpers
+# ---------------------------------------------------------------------------
+
+
+def _should_use_cdr(features: CircuitFeatures) -> bool:
+    """Return ``True`` when CDR is viable for the given circuit.
+
+    CDR is recommended when **all** of:
+    * ``non_clifford_fraction`` > ``CDR_NON_CLIFFORD_FRACTION_THRESHOLD``
+    * ``CDR_MIN_DEPTH`` <= depth <= ``CDR_MAX_DEPTH``
+    """
+    return (
+        features.non_clifford_fraction > CDR_NON_CLIFFORD_FRACTION_THRESHOLD
+        and CDR_MIN_DEPTH <= features.depth <= CDR_MAX_DEPTH
+    )
+
+
+def _compute_cdr_training_circuits(total_gate_count: int) -> int:
+    """Derive the number of CDR training circuits from the gate count."""
+    if total_gate_count < CDR_GATE_THRESHOLD_MEDIUM:
+        return CDR_TRAINING_CIRCUITS_SMALL
+    if total_gate_count <= CDR_GATE_THRESHOLD_LARGE:
+        return CDR_TRAINING_CIRCUITS_MEDIUM
+    return CDR_TRAINING_CIRCUITS_LARGE
+
+
+def _build_cdr_recipe(features: CircuitFeatures) -> MitigationRecipe:
+    """Build a CDR recipe for circuits with significant non-Clifford content."""
+    num_training = _compute_cdr_training_circuits(features.total_gate_count)
+    return MitigationRecipe(
+        technique="cdr",
+        factory_name="",
+        scale_factors=(),
+        factory_kwargs=_freeze_kwargs({
+            "num_training_circuits": num_training,
+            "fit_method": "linear",
+        }),
+        scaling_method="",
+        rationale=(
+            f"Circuit has {features.non_clifford_fraction:.0%} non-Clifford "
+            f"gates (threshold: "
+            f">{CDR_NON_CLIFFORD_FRACTION_THRESHOLD:.0%}) at depth "
+            f"{features.depth} (range: {CDR_MIN_DEPTH}-{CDR_MAX_DEPTH}).",
+            "CDR replaces non-Clifford gates with near-Clifford substitutes "
+            "to create training circuits that can be simulated classically, "
+            "then fits a regression model to correct the noisy results "
+            "(Czarnik et al., Quantum 5, 592, 2021).",
+            f"Using {num_training} training circuits with linear regression.",
+            "CDR is more accurate than ZNE on circuits with many "
+            "non-Clifford gates, and has lower overhead than PEC.",
+        ),
+        noise_category=features.noise_category,
+        estimated_overhead=float(num_training),
     )
 
 
@@ -400,11 +484,11 @@ def recommend(
 ) -> MitigationRecipe:
     """Select the optimal error mitigation recipe for a circuit.
 
-    When *technique* is ``None`` (the default), the engine first checks
-    whether PEC is viable (shallow circuit, noise model available, low
-    overhead).  If so, a PEC recipe is returned.  Otherwise, *rules* are
-    evaluated in order and the first matching predicate wins.  A
-    conservative LinearFactory fallback is used if no rule matches.
+    When *technique* is ``None`` (the default), the engine checks
+    techniques in priority order: PEC (if noise model available, shallow,
+    low overhead), CDR (if non-Clifford fraction > threshold, moderate
+    depth), then ZNE rules.  A conservative LinearFactory fallback is
+    used if no rule matches.
 
     Parameters
     ----------
@@ -413,8 +497,8 @@ def recommend(
     rules:
         Optional custom rule list.  Defaults to :data:`DEFAULT_RULES`.
     technique:
-        Force a specific technique: ``"pec"`` or ``"zne"``.  When
-        ``None``, the engine auto-selects.
+        Force a specific technique: ``"pec"``, ``"cdr"``, or ``"zne"``.
+        When ``None``, the engine auto-selects.
 
     Returns
     -------
@@ -436,19 +520,24 @@ def recommend(
     'LinearFactory'
     """
     # --- validate technique ---------------------------------------------------
-    _valid_techniques = {"zne", "pec", None}
+    _valid_techniques = {"zne", "pec", "cdr", None}
     if technique not in _valid_techniques:
         raise ValueError(
-            f"Unknown technique {technique!r}. Must be 'zne', 'pec', or None."
+            f"Unknown technique {technique!r}. "
+            f"Must be 'zne', 'pec', 'cdr', or None."
         )
 
     # --- technique override --------------------------------------------------
     if technique == "pec":
         return _build_pec_recipe(features)
+    if technique == "cdr":
+        return _build_cdr_recipe(features)
 
-    # --- auto-select: try PEC first ------------------------------------------
+    # --- auto-select: try PEC first, then CDR --------------------------------
     if technique is None and _should_use_pec(features):
         return _build_pec_recipe(features)
+    if technique is None and _should_use_cdr(features):
+        return _build_cdr_recipe(features)
 
     # --- ZNE rule chain ------------------------------------------------------
     if rules is None:
