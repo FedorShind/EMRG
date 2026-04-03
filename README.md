@@ -4,23 +4,15 @@
 
 **Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
 
-EMRG analyzes your quantum circuit and generates ready-to-run, explained [Mitiq](https://mitiq.readthedocs.io/)-powered error mitigation code. No manual tuning required.
+EMRG analyzes a quantum circuit and generates ready-to-run [Mitiq](https://mitiq.readthedocs.io/) error mitigation code. It selects between ZNE, PEC, and CDR, tunes the parameters, and explains each decision. No manual configuration required.
 
-> **Status:** v0.3.0 -- ZNE + PEC + CDR + Preview. Actively developed, [roadmap](#roadmap) ahead.
+> **v0.3.0** -- ZNE + PEC + CDR + Preview. [Roadmap](#roadmap) below.
 
 ---
 
 ## Why EMRG?
 
-Noise limits every computation on today's hardware. Error mitigation techniques like **Zero-Noise Extrapolation (ZNE)**, **Probabilistic Error Cancellation (PEC)**, and **Clifford Data Regression (CDR)** can boost fidelity 2--10x, but configuring them manually is tedious:
-
-* Which technique -- ZNE, PEC, or CDR?
-* Which extrapolation factory? Linear, Richardson, Polynomial?
-* What scale factors for your circuit depth?
-* How many training circuits for CDR?
-* How do you balance overhead vs. accuracy?
-
-**EMRG handles this automatically.** Give it a circuit, get back optimized mitigation code with clear explanations of *why* each choice was made. EMRG selects between three techniques, not just tunes settings.
+ZNE, PEC, and CDR can boost fidelity 2--10x on noisy hardware, but each has different requirements and tradeoffs. Choosing the right technique for a given circuit means evaluating depth, gate composition, non-Clifford fraction, noise model availability, and sampling overhead. EMRG automates this: give it a circuit, get back runnable mitigation code with rationale for every parameter choice.
 
 ## How It Works
 ```
@@ -28,10 +20,10 @@ Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] -->
                                      PEC / CDR / ZNE
 ```
 
-1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file
-2. **Extract Features** -- Depth, gate counts, multi-qubit gate density, noise factor, PEC overhead, non-Clifford fraction, layer heterogeneity
-3. **Select Technique** -- Choose between PEC, CDR, and ZNE based on circuit characteristics (first match wins)
-4. **Generate Code** -- Output runnable Python with Mitiq imports, config, and inline rationale
+1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file.
+2. **Extract Features** -- Depth, gate counts, noise factor, non-Clifford fraction, PEC overhead, layer heterogeneity.
+3. **Select Technique** -- First match wins: PEC > CDR > ZNE, based on circuit characteristics.
+4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
 
 ### Heuristic Rules (v0.3)
 
@@ -153,7 +145,7 @@ print(f"Mitigated expectation value: {mitigated_value}")
 
 ## Preview Mode
 
-Preview runs a noisy simulation of the circuit, applies EMRG's recommended mitigation, and displays a before/after comparison. This validates the recommendation before using real hardware shots.
+`--preview` runs a noisy simulation, applies the recommended mitigation, and displays a before/after comparison. This validates the recipe before spending real hardware shots.
 ```
 emrg generate circuit.qasm --preview
 ```
@@ -174,9 +166,9 @@ emrg generate circuit.qasm --preview
 └─────────────────────────────────────────────────┘
 ```
 
-Preview uses Cirq's `DensityMatrixSimulator` with depolarizing noise. Limitations: circuits above 10 qubits are skipped (density matrix simulation is impractical at that scale). PEC preview uses 200 samples; CDR preview uses the recipe's training circuit count. Both produce approximate results that vary between runs.
+Uses Cirq's `DensityMatrixSimulator` with per-gate depolarizing noise. Circuits above 10 qubits are skipped (density matrix cost scales as O(4^n)). PEC preview uses 200 samples; CDR uses the recipe's training circuit count. Both produce approximate results that vary between runs.
 
-Requires `pip install emrg[preview]` or `pip install cirq-core`.
+Requires `pip install emrg[preview]`.
 
 ## Project Structure
 ```
@@ -200,13 +192,13 @@ EMRG/
 
 ## Benchmarks
 
-Real measurements from EMRG v0.3.0, collected automatically by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py).
+Collected by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py) on EMRG v0.3.0.
 
 > **Environment:** Python 3.12, Windows 11 | Qiskit 2.3.0, Mitiq 0.48.1
 
 ### Tool Performance
 
-EMRG relies on pure Qiskit introspection (no simulation), so `generate_recipe()` completes in sub-millisecond time even for large circuits. Median of 100 runs:
+`generate_recipe()` uses pure Qiskit introspection (no simulation), so it completes in sub-millisecond time even for large circuits. Median of 100 runs:
 
 | Circuit | Qubits | Depth | Gates | Multi-Q | Het | Technique / Config | Time | Memory |
 |---|---|---|---|---|---|---|---|---|
@@ -227,7 +219,7 @@ A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe 
 
 ### ZNE Fidelity
 
-End-to-end ZNE on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate depolarizing noise), comparing the ⟨Z⟩ expectation value on qubit 0:
+End-to-end ZNE on Cirq `DensityMatrixSimulator` with per-gate depolarizing noise, comparing ⟨Z⟩ on qubit 0:
 
 | Circuit | Qubits | Depth | Noise | Technique / Config | Ideal | Noisy | Mitigated | Error Reduction |
 |---|---|---|---|---|---|---|---|---|
@@ -241,7 +233,7 @@ End-to-end ZNE on noisy simulations (Cirq `DensityMatrixSimulator` with per-gate
 
 ### PEC vs ZNE: Head-to-Head
 
-Same circuits, same noise, both techniques. PEC uses 1000 samples for benchmark accuracy. ZNE is deterministic; PEC results have inherent variance due to stochastic sampling.
+Same circuits, same noise, both techniques. PEC uses 1000 samples for benchmark accuracy; its results have inherent variance from stochastic sampling. ZNE is deterministic.
 
 **Single-qubit observable ⟨Z⟩:**
 
@@ -260,11 +252,11 @@ Same circuits, same noise, both techniques. PEC uses 1000 samples for benchmark 
 | VQE 4q, 2 layers | p=0.03 | 0.0102 | **3.4x** | 0.0173 | 2.0x | ZNE |
 | VQE 4q, 2 layers | p=0.05 | 0.0216 | 2.5x | 0.0147 | **3.6x** | PEC |
 
-The pattern: ZNE excels on structured circuits where the noise-vs-scale relationship is predictable (X-flip: 28.9x). PEC excels on irregular circuits at higher noise levels, where ZNE's extrapolation assumptions start to break down. On multi-qubit observables, PEC overtakes ZNE as noise increases -- at p=0.05, PEC achieves 3.6x vs ZNE's 2.5x on ⟨ZZ⟩. This is the tradeoff EMRG's heuristic engine navigates: it recommends PEC for shallow, noisy circuits where a noise model is available, and ZNE elsewhere.
+ZNE excels on structured circuits where noise scales predictably with folding (X-flip: 28.9x). PEC excels on irregular circuits at higher noise, where ZNE's extrapolation assumptions break down. On ⟨ZZ⟩, PEC overtakes ZNE as noise increases: 3.6x vs 2.5x at p=0.05. EMRG recommends PEC for shallow, noisy circuits with an available noise model, and ZNE otherwise.
 
 ### Layerwise Folding
 
-EMRG supports layerwise folding (`fold_gates_at_random`) as an alternative to global folding for circuits with heterogeneous layer structure. This feature is in active development -- current benchmarks show mixed results, and the heuristic thresholds are being refined.
+`fold_gates_at_random` targets the noisiest gates in circuits with uneven layer structure, instead of folding uniformly. Benchmarks show mixed results; the heuristic thresholds are being refined.
 
 | Circuit | Qubits | Depth | Het | Noise | Global | Layerwise | Winner |
 |---|---|---|---|---|---|---|---|
@@ -275,11 +267,11 @@ EMRG supports layerwise folding (`fold_gates_at_random`) as an alternative to gl
 | Extreme 10q | 10 | 13 | 2.50 | p=0.01 | 0.5x | 0.4x | -- |
 | Extreme 10q | 10 | 13 | 2.50 | p=0.03 | 0.5x | 0.1x | global |
 
-At this scale, `fold_global` is generally more reliable because `fold_gates_at_random` introduces stochastic variation into the extrapolation fit. Layerwise folding shows occasional strong results (12.6x on VQE at low noise) but is not yet consistent enough to be the default. EMRG currently defaults to `fold_global` for most circuits and recommends layerwise folding conservatively. Improvements to the layerwise heuristic -- including noise-aware layer selection and deterministic layer folding strategies -- are planned for future releases.
+`fold_global` is more reliable at this scale because `fold_gates_at_random` adds stochastic variation to the extrapolation fit. Layerwise folding shows occasional strong results (12.6x on VQE at low noise) but is not consistent enough to be the default. EMRG defaults to `fold_global` and uses layerwise folding conservatively for high-heterogeneity circuits.
 
 ### CDR vs ZNE
 
-CDR (Clifford Data Regression) replaces non-Clifford gates with Clifford substitutes to create classically simulable training circuits, then fits a regression model to correct noisy results. Compared to ZNE on circuits with non-Clifford gates:
+CDR replaces non-Clifford gates with Clifford substitutes to create classically simulable training circuits, then fits a regression model to correct the noisy result. Compared to ZNE on circuits with non-Clifford gates:
 
 | Circuit | Noise | ZNE Error | ZNE Reduction | CDR Error | CDR Reduction | Better |
 |---|---|---|---|---|---|---|
@@ -288,7 +280,7 @@ CDR (Clifford Data Regression) replaces non-Clifford gates with Clifford substit
 | VQE 4q, 2 layers | p=0.01 | 0.0055 | 1.4x | 0.0036 | **2.1x** | CDR |
 | VQE 4q, 2 layers | p=0.03 | 0.0162 | 1.3x | 0.0108 | **1.9x** | CDR |
 
-CDR recovers near-ideal expectation values on circuits dominated by non-Clifford rotations. On VQE circuits, CDR provides a consistent improvement over ZNE at both low and moderate noise levels. EMRG auto-selects CDR when the non-Clifford gate fraction exceeds 20% and depth is between 10 and 40.
+CDR recovers near-ideal expectation values on rotation-heavy circuits and consistently outperforms ZNE on VQE circuits at both low and moderate noise. EMRG auto-selects CDR when the non-Clifford gate fraction exceeds 20% and depth is between 10 and 40.
 
 ### Reproduce
 ```
@@ -300,8 +292,6 @@ python benchmarks/run_benchmark.py
 
 ### Phase 1 -- MVP (complete)
 
-Everything needed to go from circuit to mitigation recipe in one command:
-
 - [x] Project structure and packaging
 - [x] Circuit analyzer (feature extraction)
 - [x] Heuristic engine (ZNE: Linear + Richardson + Poly)
@@ -310,9 +300,7 @@ Everything needed to go from circuit to mitigation recipe in one command:
 - [x] Public Python API (`generate_recipe()`)
 - [x] Example circuits (Python + QASM) and documentation
 
-### Phase 2 -- More techniques, better validation (current)
-
-Expand beyond ZNE so EMRG can recommend the right technique, not just the right ZNE settings:
+### Phase 2 -- Multi-technique support (current)
 
 - [x] Probabilistic Error Cancellation (PEC) support
 - [x] Multi-technique selection (ZNE vs PEC)
@@ -326,9 +314,7 @@ Expand beyond ZNE so EMRG can recommend the right technique, not just the right 
 - [ ] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)
 
-### Phase 3 -- Multi-framework and community
-
-Make EMRG useful regardless of which framework you use:
+### Phase 3 -- Multi-framework support
 
 - [ ] Cirq, PennyLane, and Amazon Braket input support
 - [ ] Noise model import from Qiskit Aer / real device calibration data
@@ -336,39 +322,35 @@ Make EMRG useful regardless of which framework you use:
 - [ ] Jupyter widget for interactive recipe exploration
 - [ ] Web/Colab interface
 
-### Phase 4 -- Intelligence layer
-
-Replace static rules with data-driven mitigation selection:
+### Phase 4 -- Data-driven selection
 
 - [ ] Train on benchmark data to predict optimal mitigation strategy
-- [ ] Circuit similarity search -- match against known-good configurations
-- [ ] Auto-tuning -- run `--preview` internally and iterate on parameters before output
-- [ ] Cost-aware optimization -- user specifies a shot budget, EMRG optimizes within that constraint
+- [ ] Circuit similarity search against known-good configurations
+- [ ] Auto-tuning via internal `--preview` iterations before output
+- [ ] Cost-aware optimization within user-specified shot budgets
 
 ### Phase 5 -- Ecosystem integration
 
-Make EMRG part of the standard quantum development workflow:
-
 - [ ] Qiskit Runtime integration
-- [ ] Mitiq Calibration API integration -- use calibration data to refine recommendations
-- [ ] VS Code extension -- analyze circuits inline while writing them
-- [ ] CI/CD integration -- add EMRG to quantum testing pipelines for automatic mitigation
+- [ ] Mitiq Calibration API integration
+- [ ] VS Code extension for inline circuit analysis
+- [ ] CI/CD integration for quantum testing pipelines
 
 ## Tech Stack
 
 * **Python 3.11+**
-* **Qiskit** >= 1.0 -- Circuit representation and introspection
-* **Mitiq** >= 0.48 -- Error mitigation primitives
+* **Qiskit** >= 1.0 -- circuit representation and introspection
+* **Mitiq** >= 0.48 -- error mitigation primitives
 * **Click** >= 8.0 -- CLI framework
-* **Cirq** >= 1.0 -- Simulation backend (optional, for preview mode)
+* **Cirq** >= 1.0 -- simulation backend (optional, for preview and CDR)
 
 ## Contributing
 
-EMRG is open source and contributions are welcome. If you have ideas, find bugs, or want to add support for new mitigation techniques, open an issue or PR.
+Open an issue or PR on [GitHub](https://github.com/FedorShind/EMRG).
 
 ## License
 
-[MIT](LICENSE) -- Free for academic and commercial use. Do whatever you want!
+[MIT](LICENSE)
 
 ## Acknowledgments
 
