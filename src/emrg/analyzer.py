@@ -105,8 +105,9 @@ CLIFFORD_GATE_NAMES: frozenset[str] = frozenset(
     {
         "h", "x", "y", "z",
         "s", "sdg",
+        "sx", "sxdg",
         "cx", "cz", "cy",
-        "swap",
+        "swap", "iswap",
         "id", "i",
         "ecr",
         "dcx",
@@ -117,6 +118,7 @@ CLIFFORD_GATE_NAMES: frozenset[str] = frozenset(
 #: (multiples of pi/2).
 _ROTATION_GATE_NAMES: frozenset[str] = frozenset(
     {
+        "r",
         "rz", "ry", "rx",
         "p", "u1",
         "rxx", "ryy", "rzz", "rzx",
