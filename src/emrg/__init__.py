@@ -112,9 +112,9 @@ def generate_recipe(
         Variable name for the circuit in generated code
         (default ``"circuit"``).
     technique:
-        Force a specific mitigation technique: ``"zne"`` or ``"pec"``.
-        When ``None`` (default), the engine auto-selects based on
-        circuit characteristics.
+        Force a specific mitigation technique: ``"zne"``, ``"pec"``,
+        or ``"cdr"``.  When ``None`` (default), the engine auto-selects
+        based on circuit characteristics.
     noise_model_available:
         Whether a noise model is available for PEC (default ``False``).
         Set to ``True`` to enable PEC consideration.

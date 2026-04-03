@@ -104,6 +104,8 @@ def _format_features_table(features: CircuitFeatures) -> str:
         f"  Noise category:      {features.noise_category}",
         f"  PEC overhead est:    {features.pec_overhead_estimate:.2f}",
         f"  Layer heterogeneity: {features.layer_heterogeneity:.4f}",
+        f"  Non-Clifford gates:  {features.non_clifford_count}",
+        f"  Non-Clifford frac:   {features.non_clifford_fraction:.4f}",
         f"  Noise model avail:   {features.noise_model_available}",
     ]
     return "\n".join(lines)
@@ -154,7 +156,7 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--technique",
-    type=click.Choice(["zne", "pec"], case_sensitive=False),
+    type=click.Choice(["zne", "pec", "cdr"], case_sensitive=False),
     default=None,
     help="Force a specific mitigation technique (default: auto-detect).",
 )
@@ -279,6 +281,8 @@ def analyze(qasm_file: str, json_output: bool) -> None:
             "noise_model_available": features.noise_model_available,
             "pec_overhead_estimate": features.pec_overhead_estimate,
             "layer_heterogeneity": features.layer_heterogeneity,
+            "non_clifford_count": features.non_clifford_count,
+            "non_clifford_fraction": features.non_clifford_fraction,
         }
         click.echo(json.dumps(data, indent=2))
     else:
