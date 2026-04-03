@@ -43,6 +43,7 @@ __all__ = [
 
 MAX_PREVIEW_QUBITS = 10
 PEC_PREVIEW_SAMPLES = 200
+CDR_PREVIEW_TRAINING_CIRCUITS = 8
 
 # Gate-count limits for preview simulation, indexed by qubit count.
 # Density-matrix ops scale as O(4^n) per gate, and ZNE folding
@@ -283,6 +284,47 @@ def _run_pec(
 
 
 # ---------------------------------------------------------------------------
+# CDR execution
+# ---------------------------------------------------------------------------
+
+
+def _make_noiseless_executor(observable_matrix, n_qubits: int):
+    """Return a noiseless Cirq DensityMatrixSimulator executor for CDR."""
+    import cirq
+
+    def executor(circuit):
+        rho = (
+            cirq.DensityMatrixSimulator()
+            .simulate(circuit)
+            .final_density_matrix
+        )
+        return _compute_expectation(rho, observable_matrix)
+
+    return executor
+
+
+def _run_cdr(
+    cirq_circuit, noisy_executor, observable_matrix, n_qubits: int, recipe,
+) -> float:
+    """Execute CDR with a noiseless simulator for training circuits."""
+    from mitiq.cdr import execute_with_cdr
+
+    sim_executor = _make_noiseless_executor(observable_matrix, n_qubits)
+
+    num_training = recipe.factory_kwargs.get(
+        "num_training_circuits", CDR_PREVIEW_TRAINING_CIRCUITS
+    )
+
+    return execute_with_cdr(
+        cirq_circuit,
+        noisy_executor,
+        simulator=sim_executor,
+        num_training_circuits=num_training,
+        seed=42,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -401,6 +443,17 @@ def run_preview(
                 f"PEC results are approximate ({PEC_PREVIEW_SAMPLES} samples). "
                 f"Variance decreases with more samples."
             )
+        elif recipe.technique == "cdr":
+            mitigated_value = _run_cdr(
+                cirq_circuit, noisy_exec, obs_matrix, cirq_n_qubits, recipe,
+            )
+            num_tc = recipe.factory_kwargs.get(
+                "num_training_circuits", CDR_PREVIEW_TRAINING_CIRCUITS
+            )
+            warning = (
+                f"CDR results use {num_tc} training circuits. "
+                f"Accuracy improves with more training circuits."
+            )
         else:
             mitigated_value = _run_zne(cirq_circuit, noisy_exec, recipe)
             warning = None
@@ -496,6 +549,8 @@ def format_preview(
         pass
     if result.technique == "PEC":
         tech_desc = f"PEC ({PEC_PREVIEW_SAMPLES} samples)"
+    if result.technique == "CDR":
+        tech_desc = "CDR (Clifford Data Regression)"
 
     lines = [
         top,
