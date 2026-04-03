@@ -20,6 +20,8 @@ def make_features(
     noise_model_available: bool = False,
     pec_overhead_estimate: float = 1.0,
     layer_heterogeneity: float = 0.0,
+    non_clifford_count: int = 0,
+    non_clifford_fraction: float = 0.0,
 ) -> CircuitFeatures:
     """Create a CircuitFeatures with sensible defaults, overridable.
 
@@ -44,4 +46,6 @@ def make_features(
         noise_model_available=noise_model_available,
         pec_overhead_estimate=pec_overhead_estimate,
         layer_heterogeneity=layer_heterogeneity,
+        non_clifford_count=non_clifford_count,
+        non_clifford_fraction=non_clifford_fraction,
     )

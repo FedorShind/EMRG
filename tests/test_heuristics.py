@@ -522,11 +522,11 @@ class TestPECRecommend:
         with pytest.raises(ValueError, match="Unknown technique"):
             recommend(f, technique="invalid")
 
-    def test_invalid_technique_cdr_raises(self) -> None:
-        """CDR is not yet supported and should raise."""
+    def test_technique_cdr_is_valid(self) -> None:
+        """CDR is now a supported technique."""
         f = _make_features(depth=10)
-        with pytest.raises(ValueError, match="Unknown technique"):
-            recommend(f, technique="cdr")
+        recipe = recommend(f, technique="cdr")
+        assert recipe.technique == "cdr"
 
 
 # ---------------------------------------------------------------------------

@@ -472,8 +472,12 @@ class TestFullPipeline:
         code = generate_code(recipe, features)
 
         compile(code, "<emrg-vqe-pipeline>", "exec")
-        assert recipe.factory_name in code
-        assert "execute_with_zne" in code
+        # VQE with Ry rotations has high non-Clifford fraction -> CDR.
+        if recipe.technique == "cdr":
+            assert "execute_with_cdr" in code
+        else:
+            assert recipe.factory_name in code
+            assert "execute_with_zne" in code
         assert "assign_parameters" in code  # parameter warning present
 
 

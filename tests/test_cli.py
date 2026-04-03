@@ -84,9 +84,9 @@ class TestGenerate:
     def test_generate_vqe(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["generate", str(VQE_QASM)])
         assert result.exit_code == 0
-        assert "execute_with_zne" in result.output
-        # VQE has moderate depth, should get some factory
-        assert "Factory" in result.output
+        # VQE with Ry(pi/4) rotations has high non-Clifford fraction
+        # -> CDR is selected over ZNE.
+        assert "execute_with_cdr" in result.output
 
     def test_generate_explain(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["generate", str(BELL_QASM), "--explain"])
@@ -185,6 +185,8 @@ class TestAnalyze:
             "noise_model_available",
             "pec_overhead_estimate",
             "layer_heterogeneity",
+            "non_clifford_count",
+            "non_clifford_fraction",
         }
         assert set(data.keys()) == expected_keys
 
