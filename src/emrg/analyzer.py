@@ -315,38 +315,7 @@ def _estimate_pec_overhead(
 
 
 # ---------------------------------------------------------------------------
-# Layer heterogeneity
-# ---------------------------------------------------------------------------
-
-
-def _compute_layer_heterogeneity(qc: QuantumCircuit) -> float:
-    """Compute how unevenly multi-qubit gates are distributed across layers.
-
-    Returns ``max(counts) / (min(counts) + 1)`` over circuit layers that
-    contain at least one multi-qubit gate.  Returns 0.0 when fewer than
-    two such layers exist (no variation is possible).
-    """
-    from qiskit.converters import circuit_to_dag
-
-    dag = circuit_to_dag(qc)
-    mq_counts: list[int] = []
-    for layer_dict in dag.layers():
-        layer_dag = layer_dict["graph"]
-        mq = sum(
-            1
-            for node in layer_dag.op_nodes()
-            if node.op.name in MULTI_QUBIT_GATE_NAMES
-        )
-        if mq > 0:
-            mq_counts.append(mq)
-
-    if len(mq_counts) < 2:
-        return 0.0
-    return max(mq_counts) / (min(mq_counts) + 1)
-
-
-# ---------------------------------------------------------------------------
-# Non-Clifford gate counting
+# DAG-derived features
 # ---------------------------------------------------------------------------
 
 
@@ -356,57 +325,78 @@ def _is_clifford_angle(angle: float) -> bool:
     Clifford rotations are those at multiples of pi/2:
     0, pi/2, pi, 3*pi/2, 2*pi, etc.
     """
-    # Normalise to units of pi/2; check if close to an integer.
     units = angle / (math.pi / 2)
     return abs(units - round(units)) < 1e-8
 
 
-def _count_non_clifford_gates(qc: QuantumCircuit) -> int:
-    """Count gates that are outside the Clifford group.
+_NON_GATE_OP_NAMES: frozenset[str] = frozenset(
+    {"measure", "barrier", "delay", "reset"}
+)
 
-    Classification:
+
+def _walk_dag(qc: QuantumCircuit) -> tuple[float, int]:
+    """Single DAG pass returning ``(layer_heterogeneity, non_clifford_count)``.
+
+    Building the DAG dominates ``analyze_circuit`` for large circuits, so
+    both per-layer statistics and non-Clifford counting share one pass.
+
+    *layer_heterogeneity* is ``max(counts) / (min(counts) + 1)`` over
+    circuit layers that contain at least one multi-qubit gate; 0.0 when
+    fewer than two such layers exist.
+
+    *non_clifford_count* classifies each op:
     - Gates in ``CLIFFORD_GATE_NAMES`` are always Clifford.
-    - T, Tdg are always non-Clifford.
-    - Rotation gates (rz, ry, rx, p, u1, u2, u3, u, crx, cry, crz, cp,
-      rxx, ryy, rzz, rzx, cu, cu1, cu3) are Clifford only when all their
-      parameters are multiples of pi/2.
-    - Any other gate not in the known sets is counted as non-Clifford.
+    - ``t``/``tdg`` are always non-Clifford.
+    - Rotation gates are Clifford only when all parameters are multiples
+      of pi/2.
+    - Unknown gates are conservatively counted as non-Clifford.
     """
     from qiskit.converters import circuit_to_dag
 
     dag = circuit_to_dag(qc)
-    non_gate_names = {"measure", "barrier", "delay", "reset"}
-    count = 0
 
-    for node in dag.op_nodes():
-        name = node.op.name
-        if name in non_gate_names:
-            continue
+    mq_counts: list[int] = []
+    non_clifford = 0
 
-        # Always-Clifford gates.
-        if name in CLIFFORD_GATE_NAMES:
-            continue
+    for layer_dict in dag.layers():
+        layer_dag = layer_dict["graph"]
+        mq_in_layer = 0
 
-        # Always non-Clifford gates.
-        if name in ("t", "tdg"):
-            count += 1
-            continue
-
-        # Rotation gates: Clifford iff all angles are multiples of pi/2.
-        if name in _ROTATION_GATE_NAMES:
-            params = node.op.params
-            if params and all(
-                isinstance(p, (int, float)) and _is_clifford_angle(float(p))
-                for p in params
-            ):
+        for node in layer_dag.op_nodes():
+            name = node.op.name
+            if name in _NON_GATE_OP_NAMES:
                 continue
-            count += 1
-            continue
 
-        # Unknown gate -- conservatively count as non-Clifford.
-        count += 1
+            if name in MULTI_QUBIT_GATE_NAMES:
+                mq_in_layer += 1
 
-    return count
+            # Clifford classification.
+            if name in CLIFFORD_GATE_NAMES:
+                continue
+            if name in ("t", "tdg"):
+                non_clifford += 1
+                continue
+            if name in _ROTATION_GATE_NAMES:
+                params = node.op.params
+                if params and all(
+                    isinstance(p, (int, float)) and _is_clifford_angle(float(p))
+                    for p in params
+                ):
+                    continue
+                non_clifford += 1
+                continue
+            # Unknown gate -- conservatively non-Clifford.
+            non_clifford += 1
+
+        if mq_in_layer > 0:
+            mq_counts.append(mq_in_layer)
+
+    if len(mq_counts) < 2:
+        layer_het = 0.0
+    else:
+        layer_het = max(mq_counts) / (min(mq_counts) + 1)
+
+    return layer_het, non_clifford
 
 
 # ---------------------------------------------------------------------------
@@ -488,8 +478,7 @@ def analyze_circuit(
     )
 
     pec_overhead = _estimate_pec_overhead(noise_factor, multi_qubit_gate_count)
-    layer_het = _compute_layer_heterogeneity(qc)
-    non_clifford = _count_non_clifford_gates(qc)
+    layer_het, non_clifford = _walk_dag(qc)
     nc_fraction = non_clifford / total_gate_count if total_gate_count > 0 else 0.0
 
     return CircuitFeatures(
