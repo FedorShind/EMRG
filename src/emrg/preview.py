@@ -25,8 +25,19 @@ Typical usage::
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from mitiq.cdr import execute_with_cdr
+from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
+from mitiq.pec import execute_with_pec
+from mitiq.pec.representations.depolarizing import (
+    represent_operations_in_circuit_with_local_depolarizing_noise,
+)
+from mitiq.zne import execute_with_zne
+from mitiq.zne.inference import LinearFactory, PolyFactory, RichardsonFactory
+from mitiq.zne.scaling import fold_gates_at_random, fold_global
 
 if TYPE_CHECKING:
     import numpy as np
@@ -34,6 +45,8 @@ if TYPE_CHECKING:
 
     from emrg.analyzer import CircuitFeatures
     from emrg.heuristics import MitigationRecipe
+
+logger = logging.getLogger("emrg.preview")
 
 __all__ = [
     "PreviewResult",
@@ -45,10 +58,16 @@ MAX_PREVIEW_QUBITS = 10
 PEC_PREVIEW_SAMPLES = 200
 CDR_PREVIEW_TRAINING_CIRCUITS = 8
 
+#: Below this, errors are treated as numerically zero when computing the
+#: ratio of noisy-to-mitigated error.
+_ERROR_TOLERANCE = 1e-10
+
 # Gate-count limits for preview simulation, indexed by qubit count.
 # Density-matrix ops scale as O(4^n) per gate, and ZNE folding
 # multiplies gate count by the max scale factor.  These limits keep
-# preview under ~30 s on typical hardware.
+# preview under ~30 s on typical hardware.  Circuits with n <= 7
+# qubits are intentionally unbounded: 4^7 = 16384 state elements is
+# cheap enough that any realistic gate count finishes fast.
 _GATE_LIMITS: dict[int, int] = {
     8: 60,
     9: 40,
@@ -126,6 +145,30 @@ def _zz_observable(n_qubits: int) -> np.ndarray:
     return obs
 
 
+def _classify_observable(observable: str) -> tuple[str, int | None]:
+    """Split an observable string into ``(kind, qubit_index)``.
+
+    Returns ``("zz", None)`` for ``"ZZ"`` or ``("z", i)`` for ``"Zi"``.
+    Raises ``ValueError`` for any other input.  This is the single source
+    of truth for the observable grammar used by parsing and labelling.
+    """
+    obs_upper = observable.upper().strip()
+
+    if obs_upper == "ZZ":
+        return "zz", None
+
+    if obs_upper.startswith("Z") and len(obs_upper) >= 2:
+        try:
+            return "z", int(obs_upper[1:])
+        except ValueError:
+            pass
+
+    raise ValueError(
+        f"Invalid observable: {observable!r}. "
+        f"Expected 'Z0', 'Z1', ..., or 'ZZ'."
+    )
+
+
 def _parse_observable(observable: str, n_qubits: int) -> np.ndarray:
     """Parse an observable string into a numpy matrix.
 
@@ -133,32 +176,20 @@ def _parse_observable(observable: str, n_qubits: int) -> np.ndarray:
     - ``"Z0"``, ``"Z1"``, ... ``"Z9"`` -- single-qubit Z on qubit N
     - ``"ZZ"`` -- Z_0 Z_1
     """
-    obs_upper = observable.upper().strip()
+    kind, qubit_index = _classify_observable(observable)
 
-    if obs_upper == "ZZ":
+    if kind == "zz":
         if n_qubits < 2:
             raise ValueError("ZZ observable requires at least 2 qubits.")
         return _zz_observable(n_qubits)
 
-    if obs_upper.startswith("Z") and len(obs_upper) >= 2:
-        try:
-            qubit_index = int(obs_upper[1:])
-        except ValueError:
-            raise ValueError(
-                f"Invalid observable: {observable!r}. "
-                f"Expected 'Z0', 'Z1', ..., or 'ZZ'."
-            ) from None
-        if qubit_index < 0 or qubit_index >= n_qubits:
-            raise ValueError(
-                f"Qubit index {qubit_index} out of range for "
-                f"{n_qubits}-qubit circuit."
-            )
-        return _z_on_qubit(qubit_index, n_qubits)
-
-    raise ValueError(
-        f"Invalid observable: {observable!r}. "
-        f"Expected 'Z0', 'Z1', ..., or 'ZZ'."
-    )
+    # kind == "z"; _classify_observable guarantees qubit_index is an int.
+    if qubit_index is None or qubit_index < 0 or qubit_index >= n_qubits:
+        raise ValueError(
+            f"Qubit index {qubit_index} out of range for "
+            f"{n_qubits}-qubit circuit."
+        )
+    return _z_on_qubit(qubit_index, n_qubits)
 
 
 # ---------------------------------------------------------------------------
@@ -209,15 +240,11 @@ def _make_executor(noise_level: float, observable_matrix, n_qubits: int):
     return executor
 
 
-def _compute_error_reduction(
-    ideal: float, noisy: float, mitigated: float
-) -> float:
-    """Compute noisy_error / mitigated_error."""
-    noisy_err = abs(ideal - noisy)
-    mitigated_err = abs(ideal - mitigated)
-    if mitigated_err < 1e-10:
-        return float("inf") if noisy_err > 1e-10 else 1.0
-    if noisy_err < 1e-10:
+def _compute_error_reduction(noisy_err: float, mitigated_err: float) -> float:
+    """Return the ratio ``noisy_err / mitigated_err``, handling zero edges."""
+    if mitigated_err < _ERROR_TOLERANCE:
+        return float("inf") if noisy_err > _ERROR_TOLERANCE else 1.0
+    if noisy_err < _ERROR_TOLERANCE:
         return 1.0
     return noisy_err / mitigated_err
 
@@ -229,10 +256,6 @@ def _compute_error_reduction(
 
 def _run_zne(cirq_circuit, noisy_executor, recipe: MitigationRecipe) -> float:
     """Execute ZNE using the actual recipe parameters."""
-    from mitiq.zne import execute_with_zne
-    from mitiq.zne.inference import LinearFactory, PolyFactory, RichardsonFactory
-    from mitiq.zne.scaling import fold_gates_at_random, fold_global
-
     factory_cls = {
         "LinearFactory": LinearFactory,
         "RichardsonFactory": RichardsonFactory,
@@ -263,11 +286,6 @@ def _run_pec(
     cirq_circuit, noisy_executor, noise_level: float
 ) -> float:
     """Execute PEC with depolarizing representations."""
-    from mitiq.pec import execute_with_pec
-    from mitiq.pec.representations.depolarizing import (
-        represent_operations_in_circuit_with_local_depolarizing_noise,
-    )
-
     representations = (
         represent_operations_in_circuit_with_local_depolarizing_noise(
             cirq_circuit, noise_level=noise_level,
@@ -288,28 +306,11 @@ def _run_pec(
 # ---------------------------------------------------------------------------
 
 
-def _make_noiseless_executor(observable_matrix, n_qubits: int):
-    """Return a noiseless Cirq DensityMatrixSimulator executor for CDR."""
-    import cirq
-
-    def executor(circuit):
-        rho = (
-            cirq.DensityMatrixSimulator()
-            .simulate(circuit)
-            .final_density_matrix
-        )
-        return _compute_expectation(rho, observable_matrix)
-
-    return executor
-
-
 def _run_cdr(
     cirq_circuit, noisy_executor, observable_matrix, n_qubits: int, recipe,
 ) -> float:
     """Execute CDR with a noiseless simulator for training circuits."""
-    from mitiq.cdr import execute_with_cdr
-
-    sim_executor = _make_noiseless_executor(observable_matrix, n_qubits)
+    sim_executor = _make_executor(0.0, observable_matrix, n_qubits)
 
     num_training = recipe.factory_kwargs.get(
         "num_training_circuits", CDR_PREVIEW_TRAINING_CIRCUITS
@@ -413,8 +414,6 @@ def run_preview(
             )
 
     try:
-        from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
-
         # Strip measurements -- Cirq density matrix sim doesn't need them.
         gate_only = qc.copy()
         gate_only.remove_final_measurements()
@@ -460,9 +459,7 @@ def run_preview(
 
         noisy_err = abs(ideal_value - noisy_value)
         mitigated_err = abs(ideal_value - mitigated_value)
-        reduction = _compute_error_reduction(
-            ideal_value, noisy_value, mitigated_value
-        )
+        reduction = _compute_error_reduction(noisy_err, mitigated_err)
 
         return PreviewResult(
             ideal_value=ideal_value,
@@ -478,7 +475,8 @@ def run_preview(
             warning=warning,
         )
 
-    except Exception as exc:
+    except (ValueError, RuntimeError, ImportError, NotImplementedError) as exc:
+        logger.debug("Preview simulation failed", exc_info=True)
         return PreviewResult(
             ideal_value=None,
             noisy_value=None,
@@ -500,13 +498,18 @@ def run_preview(
 
 
 def _format_observable_label(observable: str) -> str:
-    """Turn 'Z0' into '<Z> on qubit 0', 'ZZ' into '<ZZ> on qubits 0,1'."""
-    obs_upper = observable.upper().strip()
-    if obs_upper == "ZZ":
+    """Turn 'Z0' into '<Z> on qubit 0', 'ZZ' into '<ZZ> on qubits 0,1'.
+
+    Falls back to the raw string for unparseable inputs so the preview
+    box always renders something.
+    """
+    try:
+        kind, qubit_index = _classify_observable(observable)
+    except ValueError:
+        return observable
+    if kind == "zz":
         return "<ZZ> on qubits 0,1"
-    if obs_upper.startswith("Z") and len(obs_upper) >= 2:
-        return f"<Z> on qubit {obs_upper[1:]}"
-    return observable
+    return f"<Z> on qubit {qubit_index}"
 
 
 def format_preview(
@@ -543,13 +546,9 @@ def format_preview(
 
     # Technique description.
     tech_desc = result.technique
-    if result.technique == "ZNE" and features.depth is not None:
-        # Include factory info from features context -- but we only
-        # have the technique string here. Keep it simple.
-        pass
     if result.technique == "PEC":
         tech_desc = f"PEC ({PEC_PREVIEW_SAMPLES} samples)"
-    if result.technique == "CDR":
+    elif result.technique == "CDR":
         tech_desc = "CDR (Clifford Data Regression)"
 
     lines = [
