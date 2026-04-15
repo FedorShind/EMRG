@@ -26,7 +26,7 @@ from emrg.heuristics import (
     MitigationRecipe,
     recommend,
 )
-from tests._helpers import make_features
+from tests.conftest import make_features
 
 # ---------------------------------------------------------------------------
 # Fixtures

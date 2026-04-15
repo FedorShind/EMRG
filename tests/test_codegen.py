@@ -9,7 +9,7 @@ from emrg import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
-from tests._helpers import make_features as _make_features
+from tests.conftest import make_features as _make_features
 
 # ---------------------------------------------------------------------------
 # Helpers

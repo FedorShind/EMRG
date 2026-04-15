@@ -22,7 +22,7 @@ from qiskit import QuantumCircuit
 from emrg import analyze_circuit, generate_recipe
 from emrg.cli import main as cli_main
 from emrg.heuristics import recommend
-from tests._helpers import make_features as _make_features
+from tests.conftest import make_features as _make_features
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "examples"
 _BELL_QASM = _EXAMPLES_DIR / "bell_state.qasm"

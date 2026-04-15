@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from emrg.analyzer import CircuitFeatures
@@ -20,7 +22,7 @@ from emrg.heuristics import (
     _should_use_pec,
     recommend,
 )
-from tests._helpers import make_features as _make_features
+from tests.conftest import make_features as _make_features
 
 # ---------------------------------------------------------------------------
 # Fixtures -- representative circuits for each tier
@@ -642,6 +644,29 @@ class TestPECSamples:
 
     def test_zero_overhead_clamps_to_min(self) -> None:
         assert _compute_pec_samples(0.0) == PEC_MIN_SAMPLES
+
+    def test_infinite_overhead_returns_max(self) -> None:
+        # Guard against OverflowError when a user forces --technique pec
+        # on a circuit deep enough that pec_overhead_estimate saturates
+        # to math.inf (the analyzer caps the exponent at 700).
+        assert _compute_pec_samples(math.inf) == PEC_MAX_SAMPLES
+
+    def test_nan_overhead_returns_max(self) -> None:
+        assert _compute_pec_samples(float("nan")) == PEC_MAX_SAMPLES
+
+    def test_forced_pec_on_inf_overhead_does_not_crash(self) -> None:
+        # End-to-end: forcing technique="pec" through recommend() on a
+        # circuit whose overhead is math.inf must not raise.  This is
+        # the entrypoint the original OverflowError surfaced through.
+        features = _make_features(
+            depth=80,
+            multi_qubit_gate_count=400,
+            pec_overhead_estimate=math.inf,
+            noise_model_available=True,
+        )
+        recipe = recommend(features, technique="pec")
+        assert recipe.technique == "pec"
+        assert recipe.factory_kwargs["num_samples"] == PEC_MAX_SAMPLES
 
 
 # ---------------------------------------------------------------------------
