@@ -21,7 +21,7 @@ keywords = [
     "mitiq",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -44,8 +44,9 @@ dev = [
 ]
 preview = [
     "cirq-core>=1.0",
-    "ply",
-    "qiskit-aer",
+]
+qasm3 = [
+    "qiskit_qasm3_import",
 ]
 
 [project.scripts]
@@ -71,3 +72,4 @@ select = ["E", "F", "I", "N", "W", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers --strict-config -ra"
