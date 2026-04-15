@@ -203,7 +203,14 @@ def _compute_pec_samples(overhead: float) -> int:
     """Derive the number of PEC samples from the overhead estimate.
 
     The result is clamped between ``PEC_MIN_SAMPLES`` and ``PEC_MAX_SAMPLES``.
+    ``math.inf`` and ``NaN`` overheads (possible when a user forces PEC on
+    a circuit deep enough that the exponential cap kicks in) collapse to
+    ``PEC_MAX_SAMPLES``.
     """
+    import math
+
+    if math.isinf(overhead) or math.isnan(overhead):
+        return PEC_MAX_SAMPLES
     return max(PEC_MIN_SAMPLES, min(PEC_MAX_SAMPLES, int(overhead * 2)))
 
 
@@ -461,6 +468,10 @@ def _build_fallback_recipe(features: CircuitFeatures) -> MitigationRecipe:
 #: 2. Moderate + heterogeneous    ->  RichardsonFactory + fold_gates_at_random
 #: 3. Moderate depth (uniform)    ->  RichardsonFactory + fold_global
 #: 4. Shallow / low-gate          ->  LinearFactory + fold_global
+#:
+#: Order is load-bearing: ``_is_moderate_heterogeneous`` uses ``15 <= depth
+#: <= 50`` which overlaps with ``_is_shallow``'s ``depth < 20`` at depths
+#: 15-19, so heterogeneous must be checked before shallow.
 #:
 #: If none match, :func:`recommend` uses :func:`_build_fallback_recipe`.
 DEFAULT_RULES: tuple[Rule, ...] = (
