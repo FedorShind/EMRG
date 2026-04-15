@@ -29,15 +29,14 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from mitiq.cdr import execute_with_cdr
-from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
-from mitiq.pec import execute_with_pec
-from mitiq.pec.representations.depolarizing import (
-    represent_operations_in_circuit_with_local_depolarizing_noise,
-)
-from mitiq.zne import execute_with_zne
-from mitiq.zne.inference import LinearFactory, PolyFactory, RichardsonFactory
-from mitiq.zne.scaling import fold_gates_at_random, fold_global
+# NOTE: Mitiq imports are deferred to function bodies.  Mitiq is a
+# required runtime dep, so at first glance eager imports look harmless,
+# but `mitiq.interface.mitiq_qiskit.conversions` transitively imports
+# `cirq.contrib.qasm_import`, which depends on `ply` — a package cirq-core
+# does not declare.  Keeping these imports lazy means `import emrg`
+# succeeds on any machine that has Mitiq, regardless of whether `ply`
+# is present; the preview path raises a clean ImportError only when the
+# user actually calls run_preview().
 
 if TYPE_CHECKING:
     import numpy as np
@@ -256,6 +255,10 @@ def _compute_error_reduction(noisy_err: float, mitigated_err: float) -> float:
 
 def _run_zne(cirq_circuit, noisy_executor, recipe: MitigationRecipe) -> float:
     """Execute ZNE using the actual recipe parameters."""
+    from mitiq.zne import execute_with_zne
+    from mitiq.zne.inference import LinearFactory, PolyFactory, RichardsonFactory
+    from mitiq.zne.scaling import fold_gates_at_random, fold_global
+
     factory_cls = {
         "LinearFactory": LinearFactory,
         "RichardsonFactory": RichardsonFactory,
@@ -286,6 +289,11 @@ def _run_pec(
     cirq_circuit, noisy_executor, noise_level: float
 ) -> float:
     """Execute PEC with depolarizing representations."""
+    from mitiq.pec import execute_with_pec
+    from mitiq.pec.representations.depolarizing import (
+        represent_operations_in_circuit_with_local_depolarizing_noise,
+    )
+
     representations = (
         represent_operations_in_circuit_with_local_depolarizing_noise(
             cirq_circuit, noise_level=noise_level,
@@ -310,6 +318,8 @@ def _run_cdr(
     cirq_circuit, noisy_executor, observable_matrix, n_qubits: int, recipe,
 ) -> float:
     """Execute CDR with a noiseless simulator for training circuits."""
+    from mitiq.cdr import execute_with_cdr
+
     sim_executor = _make_executor(0.0, observable_matrix, n_qubits)
 
     num_training = recipe.factory_kwargs.get(
@@ -414,6 +424,14 @@ def run_preview(
             )
 
     try:
+        # Lazy import: mitiq.interface.mitiq_qiskit.conversions pulls in
+        # cirq.contrib.qasm_import, which requires `ply` -- a soft dep
+        # not installed by `pip install emrg`.  Deferring the import lets
+        # the ImportError be caught by the except block below so the
+        # caller gets a clean PreviewResult with a warning instead of
+        # a crash at module load time.
+        from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
+
         # Strip measurements -- Cirq density matrix sim doesn't need them.
         gate_only = qc.copy()
         gate_only.remove_final_measurements()

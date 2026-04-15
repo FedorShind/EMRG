@@ -41,9 +41,14 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.4",
     "cirq-core>=1.0",
+    # ply is a soft dep of cirq.contrib.qasm_import that cirq-core does
+    # not declare; required by preview tests because the Mitiq->Cirq
+    # conversion path imports it.
+    "ply",
 ]
 preview = [
     "cirq-core>=1.0",
+    "ply",
 ]
 qasm3 = [
     "qiskit_qasm3_import",
