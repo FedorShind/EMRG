@@ -1,6 +1,7 @@
 # EMRG
 
 [![CI](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml/badge.svg)](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
 
 **Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
 
@@ -53,6 +54,8 @@ git clone https://github.com/FedorShind/EMRG.git
 cd EMRG
 pip install -e ".[dev]"
 ```
+
+Or try it without installing: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
 
 ### CLI Usage
 ```
