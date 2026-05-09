@@ -7,7 +7,7 @@
 
 EMRG analyzes a quantum circuit and generates ready-to-run [Mitiq](https://mitiq.readthedocs.io/) error mitigation code. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes, tunes the parameters, and explains each decision. No manual configuration required.
 
-> **v0.3.2** -- ZNE + PEC + CDR + Composite + Preview. [Roadmap](#roadmap) below.
+> **v0.4.0** -- ZNE + PEC + CDR + Composite + Preview. [Roadmap](#roadmap) below.
 
 ---
 
@@ -26,7 +26,7 @@ Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] -->
 3. **Select Technique** -- Use priority rules: composite for eligible moderate-depth circuits, PEC for shallow low-overhead noise-model cases, CDR for non-Clifford-heavy circuits, otherwise ZNE.
 4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
 
-### Heuristic Rules (v0.3.2)
+### Heuristic Rules (v0.4.0)
 
 | Circuit Profile | Technique | Configuration | Rationale |
 |---|---|---|---|
