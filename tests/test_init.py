@@ -175,3 +175,40 @@ class TestGenerateRecipePEC:
             bell_circuit, technique="pec", noise_model_available=True
         )
         compile(result.code, "<emrg-pec-test>", "exec")
+
+
+# ---------------------------------------------------------------------------
+# Tests: Composite via generate_recipe()
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateRecipeComposite:
+    """Verify composite integration through the public API."""
+
+    def test_composite_technique_override(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        result = generate_recipe(
+            bell_circuit, technique="composite", noise_model_available=True
+        )
+        assert result.recipe.technique == "composite"
+        assert "execute_with_zne" in result.code
+        assert "execute_with_pec" in result.code
+
+    def test_composite_auto_for_moderate_noise_model_circuit(self) -> None:
+        qc = QuantumCircuit(4, 4)
+        for _ in range(16):
+            qc.cx(0, 1)
+        qc.measure(range(4), range(4))
+
+        result = generate_recipe(qc, noise_model_available=True)
+        assert result.recipe.technique == "composite"
+        assert len(result.recipe.components) == 2
+
+    def test_composite_code_is_valid_python(
+        self, bell_circuit: QuantumCircuit
+    ) -> None:
+        result = generate_recipe(
+            bell_circuit, technique="composite", noise_model_available=True
+        )
+        compile(result.code, "<emrg-composite-test>", "exec")

@@ -156,7 +156,7 @@ def main(ctx: click.Context) -> None:
 )
 @click.option(
     "--technique",
-    type=click.Choice(["zne", "pec", "cdr"], case_sensitive=False),
+    type=click.Choice(["zne", "pec", "cdr", "composite"], case_sensitive=False),
     default=None,
     help="Force a specific mitigation technique (default: auto-detect).",
 )

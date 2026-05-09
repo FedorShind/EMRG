@@ -355,6 +355,39 @@ class TestGeneratePEC:
 
 
 # ---------------------------------------------------------------------------
+# Tests: composite generate command
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateComposite:
+    """Verify --technique composite produces a combined recipe."""
+
+    def test_generate_composite_override(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            main,
+            ["generate", str(BELL_QASM), "--technique", "composite", "--noise-model"],
+        )
+        assert result.exit_code == 0
+        assert "Composite (ZNE over PEC)" in result.output
+        assert "execute_with_zne" in result.output
+        assert "execute_with_pec" in result.output
+
+    def test_generate_composite_explain(self, runner: CliRunner) -> None:
+        result = runner.invoke(
+            main,
+            [
+                "generate", str(BELL_QASM),
+                "--technique", "composite",
+                "--noise-model",
+                "--explain",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Rationale:" in result.output
+        assert "Combined estimated overhead" in result.output
+
+
+# ---------------------------------------------------------------------------
 # Tests: layer heterogeneity in analyze output
 # ---------------------------------------------------------------------------
 
