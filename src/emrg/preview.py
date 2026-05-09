@@ -310,6 +310,41 @@ def _run_pec(
 
 
 # ---------------------------------------------------------------------------
+# Composite execution
+# ---------------------------------------------------------------------------
+
+
+def _get_composite_components(
+    recipe: MitigationRecipe,
+) -> tuple[MitigationRecipe, MitigationRecipe]:
+    """Return ``(zne_recipe, pec_recipe)`` from a composite recipe."""
+    if len(recipe.components) != 2:
+        raise ValueError("Composite recipes require ZNE and PEC components.")
+
+    zne_recipe, pec_recipe = recipe.components
+    if zne_recipe.technique != "zne" or pec_recipe.technique != "pec":
+        raise ValueError(
+            "Composite recipe components must be ordered as ZNE, then PEC."
+        )
+    return zne_recipe, pec_recipe
+
+
+def _run_composite(
+    cirq_circuit,
+    noisy_executor,
+    noise_level: float,
+    recipe: MitigationRecipe,
+) -> float:
+    """Execute ZNE over a PEC executor using the component recipes."""
+    zne_recipe, _pec_recipe = _get_composite_components(recipe)
+
+    def pec_executor(circuit):
+        return _run_pec(circuit, noisy_executor, noise_level)
+
+    return _run_zne(cirq_circuit, pec_executor, zne_recipe)
+
+
+# ---------------------------------------------------------------------------
 # CDR execution
 # ---------------------------------------------------------------------------
 
@@ -460,6 +495,15 @@ def run_preview(
                 f"PEC results are approximate ({PEC_PREVIEW_SAMPLES} samples). "
                 f"Variance decreases with more samples."
             )
+        elif recipe.technique == "composite":
+            mitigated_value = _run_composite(
+                cirq_circuit, noisy_exec, noise_level, recipe
+            )
+            warning = (
+                f"Composite results are approximate: PEC uses "
+                f"{PEC_PREVIEW_SAMPLES} samples inside each ZNE scale "
+                f"evaluation. Variance decreases with more samples."
+            )
         elif recipe.technique == "cdr":
             mitigated_value = _run_cdr(
                 cirq_circuit, noisy_exec, obs_matrix, cirq_n_qubits, recipe,
@@ -568,6 +612,8 @@ def format_preview(
         tech_desc = f"PEC ({PEC_PREVIEW_SAMPLES} samples)"
     elif result.technique == "CDR":
         tech_desc = "CDR (Clifford Data Regression)"
+    elif result.technique == "COMPOSITE":
+        tech_desc = "Composite (ZNE over PEC)"
 
     lines = [
         top,

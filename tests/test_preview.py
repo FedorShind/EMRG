@@ -300,6 +300,16 @@ class TestFormatPreview:
         output = format_preview(result, features)
         assert "Simulation skipped" in output
 
+    def test_composite_technique_label(self, bell_circuit):
+        result = generate_recipe(
+            bell_circuit,
+            technique="composite",
+            preview=True,
+            noise_model_available=True,
+        )
+        output = format_preview(result.preview, result.features)
+        assert "Composite (ZNE over PEC)" in output
+
 
 # ---------------------------------------------------------------------------
 # D. API integration tests
@@ -330,6 +340,18 @@ class TestGenerateRecipePreview:
             noise_model_available=True,
         )
         assert result.preview is not None
+
+    def test_preview_with_composite(self, bell_circuit):
+        result = generate_recipe(
+            bell_circuit,
+            technique="composite",
+            preview=True,
+            noise_model_available=True,
+        )
+        assert result.preview is not None
+        assert result.preview.technique == "COMPOSITE"
+        assert result.preview.warning is not None
+        assert "approximate" in result.preview.warning.lower()
 
     def test_str_includes_preview(self, bell_circuit):
         result = generate_recipe(bell_circuit, preview=True)
