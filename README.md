@@ -5,31 +5,32 @@
 
 **Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
 
-EMRG analyzes a quantum circuit and generates ready-to-run [Mitiq](https://mitiq.readthedocs.io/) error mitigation code. It selects between ZNE, PEC, and CDR, tunes the parameters, and explains each decision. No manual configuration required.
+EMRG analyzes a quantum circuit and generates ready-to-run [Mitiq](https://mitiq.readthedocs.io/) error mitigation code. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes, tunes the parameters, and explains each decision. No manual configuration required.
 
-> **v0.3.0** -- ZNE + PEC + CDR + Preview. [Roadmap](#roadmap) below.
+> **v0.3.2** -- ZNE + PEC + CDR + Composite + Preview. [Roadmap](#roadmap) below.
 
 ---
 
 ## Why EMRG?
 
-ZNE, PEC, and CDR can boost fidelity 2--10x on noisy hardware, but each has different requirements and tradeoffs. Choosing the right technique for a given circuit means evaluating depth, gate composition, non-Clifford fraction, noise model availability, and sampling overhead. EMRG automates this: give it a circuit, get back runnable mitigation code with rationale for every parameter choice.
+ZNE, PEC, CDR, and composite pipelines can boost fidelity 2--10x on noisy hardware, but each has different requirements and tradeoffs. Choosing the right technique for a given circuit means evaluating depth, gate composition, non-Clifford fraction, noise model availability, and sampling overhead. EMRG automates this: give it a circuit, get back runnable mitigation code with rationale for every parameter choice.
 
 ## How It Works
 ```
 Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] --> Mitigated Code
-                                     PEC / CDR / ZNE
+                                     Composite / PEC / CDR / ZNE
 ```
 
 1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file.
 2. **Extract Features** -- Depth, gate counts, noise factor, non-Clifford fraction, PEC overhead, layer heterogeneity.
-3. **Select Technique** -- First match wins: PEC > CDR > ZNE, based on circuit characteristics.
+3. **Select Technique** -- First match wins: Composite > PEC > CDR > ZNE, based on circuit characteristics.
 4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
 
 ### Heuristic Rules (v0.3)
 
 | Circuit Profile | Technique | Configuration | Rationale |
 |---|---|---|---|
+| Depth 15--30 + moderate noise + noise model + combined overhead <= 1000 | **Composite (ZNE over PEC)** | ZNE factory over PEC executor | PEC corrects each noise-scaled circuit before ZNE extrapolates residual bias |
 | Depth ≤ 30 + noise model + overhead < 1000 | **PEC** | Depolarizing representations | Unbiased error cancellation when overhead is manageable |
 | Non-Clifford fraction > 20% + depth 10--40 | **CDR** | 8--16 training circuits, linear fit | Clifford substitution + regression outperforms ZNE on non-Clifford-heavy circuits |
 | Depth < 20, low multi-qubit gates | ZNE `LinearFactory` | `[1.0, 1.5, 2.0]` | Conservative for shallow circuits |
@@ -70,6 +71,7 @@ emrg generate circuit.qasm -o mitigated.py
 
 # Force a specific technique
 emrg generate circuit.qasm --technique pec --noise-model
+emrg generate circuit.qasm --technique composite --noise-model
 emrg generate circuit.qasm --technique cdr
 
 # Preview: simulate and compare before/after mitigation
@@ -107,6 +109,9 @@ result = generate_recipe(qc, noise_model_available=True)
 
 # Force CDR (requires cirq: pip install emrg[preview])
 result = generate_recipe(qc, technique="cdr")
+
+# Force composite ZNE-over-PEC (requires noise model availability)
+result = generate_recipe(qc, technique="composite", noise_model_available=True)
 
 # With preview simulation
 result = generate_recipe(qc, preview=True, noise_level=0.01)
@@ -169,7 +174,7 @@ emrg generate circuit.qasm --preview
 └─────────────────────────────────────────────────┘
 ```
 
-Uses Cirq's `DensityMatrixSimulator` with per-gate depolarizing noise. Circuits above 10 qubits are skipped (density matrix cost scales as O(4^n)). PEC preview uses 200 samples; CDR uses the recipe's training circuit count. Both produce approximate results that vary between runs.
+Uses Cirq's `DensityMatrixSimulator` with per-gate depolarizing noise. Circuits above 10 qubits are skipped (density matrix cost scales as O(4^n)). PEC preview uses 200 samples; composite preview uses 200 PEC samples inside each ZNE scale evaluation; CDR uses the recipe's training circuit count. These stochastic previews are approximate and vary between runs.
 
 Requires `pip install emrg[preview]`.
 
@@ -314,7 +319,7 @@ python benchmarks/run_benchmark.py
 - [x] Expanded tutorials (VQE, QAOA)
 - [x] 366+ tests, 99% coverage, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
-- [ ] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
+- [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)
 
 ### Phase 3 -- Multi-framework support
