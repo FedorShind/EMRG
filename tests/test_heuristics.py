@@ -530,6 +530,77 @@ class TestPECRecommend:
         recipe = recommend(f, technique="cdr")
         assert recipe.technique == "cdr"
 
+    def test_technique_composite_is_valid(self) -> None:
+        """Composite can be forced like the other mitigation families."""
+        f = _make_features(
+            depth=25,
+            noise_category="moderate",
+            noise_model_available=True,
+            pec_overhead_estimate=10.0,
+        )
+        recipe = recommend(f, technique="composite")
+        assert recipe.technique == "composite"
+        assert len(recipe.components) == 2
+        assert [component.technique for component in recipe.components] == [
+            "zne", "pec",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Tests: Composite recommend()
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeRecommend:
+    """Verify ZNE-over-PEC composite recipe selection."""
+
+    def test_auto_selects_composite_for_moderate_pec_eligible_circuit(self) -> None:
+        f = _make_features(
+            depth=25,
+            total_gate_count=30,
+            multi_qubit_gate_count=6,
+            single_qubit_gate_count=24,
+            estimated_noise_factor=0.084,
+            noise_category="moderate",
+            noise_model_available=True,
+            pec_overhead_estimate=20.0,
+        )
+        recipe = recommend(f)
+        assert recipe.technique == "composite"
+        assert len(recipe.components) == 2
+        zne_recipe, pec_recipe = recipe.components
+        assert zne_recipe.technique == "zne"
+        assert pec_recipe.technique == "pec"
+        assert recipe.estimated_overhead == pytest.approx(
+            zne_recipe.estimated_overhead * pec_recipe.estimated_overhead
+        )
+
+    def test_low_noise_eligible_circuit_stays_pec(self) -> None:
+        f = _make_features(
+            depth=4,
+            total_gate_count=2,
+            multi_qubit_gate_count=1,
+            single_qubit_gate_count=1,
+            estimated_noise_factor=0.011,
+            noise_category="low",
+            noise_model_available=True,
+            pec_overhead_estimate=1.1,
+        )
+        recipe = recommend(f)
+        assert recipe.technique == "pec"
+
+    def test_composite_override_works_without_noise_model_flag(self) -> None:
+        f = _make_features(
+            depth=25,
+            noise_category="moderate",
+            noise_model_available=False,
+            pec_overhead_estimate=10.0,
+        )
+        recipe = recommend(f, technique="composite")
+        assert recipe.technique == "composite"
+        assert recipe.components[0].technique == "zne"
+        assert recipe.components[1].technique == "pec"
+
 
 # ---------------------------------------------------------------------------
 # Tests: PEC recipe content

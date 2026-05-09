@@ -55,6 +55,9 @@ __all__ = [
     "PEC_DEFAULT_NOISE_LEVEL",
     "PEC_MIN_SAMPLES",
     "PEC_MAX_SAMPLES",
+    "COMPOSITE_MIN_DEPTH",
+    "COMPOSITE_MAX_DEPTH",
+    "COMPOSITE_MAX_OVERHEAD",
     "LAYERWISE_MIN_DEPTH",
     "LAYERWISE_MAX_DEPTH",
     "LAYERWISE_HETEROGENEITY_THRESHOLD",
@@ -92,6 +95,17 @@ PEC_MIN_SAMPLES: int = 100
 
 #: Maximum number of PEC samples to request.
 PEC_MAX_SAMPLES: int = 500
+
+# --- Composite (ZNE over PEC) constants ---------------------------------------
+
+#: Minimum circuit depth for composite mitigation consideration.
+COMPOSITE_MIN_DEPTH: int = 15
+
+#: Maximum circuit depth for composite mitigation consideration.
+COMPOSITE_MAX_DEPTH: int = PEC_MAX_DEPTH
+
+#: Maximum combined shot multiplier for automatic composite selection.
+COMPOSITE_MAX_OVERHEAD: float = 1000.0
 
 #: Minimum circuit depth for layerwise Richardson consideration.
 LAYERWISE_MIN_DEPTH: int = 15
@@ -151,6 +165,8 @@ class MitigationRecipe:
         noise_category: Copied from :class:`CircuitFeatures` for convenience.
         estimated_overhead: Approximate shot-count multiplier
             (roughly ``len(scale_factors)``).
+        components: Child recipes used by composite techniques. Empty for
+            single-technique recipes.
     """
 
     technique: str
@@ -161,6 +177,7 @@ class MitigationRecipe:
     rationale: tuple[str, ...] = ()
     noise_category: str = "low"
     estimated_overhead: float = 1.0
+    components: tuple[MitigationRecipe, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +314,75 @@ def _build_cdr_recipe(features: CircuitFeatures) -> MitigationRecipe:
         noise_category=features.noise_category,
         estimated_overhead=float(num_training),
     )
+
+
+# ---------------------------------------------------------------------------
+# Composite helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_zne_recipe(
+    features: CircuitFeatures,
+    rules: Sequence[Rule] | None = None,
+) -> MitigationRecipe:
+    """Return the ZNE recipe selected by the configured ZNE rule chain."""
+    if rules is None:
+        active_rules = DEFAULT_RULES
+    else:
+        active_rules = tuple(rules)
+
+    for predicate, builder in active_rules:
+        if predicate(features):
+            return builder(features)
+
+    return _build_fallback_recipe(features)
+
+
+def _build_composite_recipe(
+    features: CircuitFeatures,
+    rules: Sequence[Rule] | None = None,
+) -> MitigationRecipe:
+    """Build a composite recipe that runs ZNE over a PEC executor."""
+    zne_recipe = _build_zne_recipe(features, rules)
+    pec_recipe = _build_pec_recipe(features)
+    combined_overhead = (
+        zne_recipe.estimated_overhead * pec_recipe.estimated_overhead
+    )
+    return MitigationRecipe(
+        technique="composite",
+        factory_name="",
+        scale_factors=(),
+        factory_kwargs=_freeze_kwargs({}),
+        scaling_method="",
+        rationale=(
+            "Composite recipe selected: PEC corrects each noise-scaled "
+            "circuit before ZNE extrapolates the residual bias.",
+            f"ZNE component uses {zne_recipe.factory_name} with "
+            f"{zne_recipe.scaling_method}; PEC component uses "
+            f"{pec_recipe.factory_kwargs['num_samples']} samples.",
+            f"Combined estimated overhead is ~{combined_overhead:.1f}x "
+            "the base shot count.",
+        ),
+        noise_category=features.noise_category,
+        estimated_overhead=combined_overhead,
+        components=(zne_recipe, pec_recipe),
+    )
+
+
+def _should_use_composite(features: CircuitFeatures) -> bool:
+    """Return ``True`` when ZNE-over-PEC is viable and worth the cost."""
+    if not _should_use_pec(features):
+        return False
+    if features.noise_category == "low":
+        return False
+    if _should_use_cdr(features):
+        return False
+    if not COMPOSITE_MIN_DEPTH <= features.depth <= COMPOSITE_MAX_DEPTH:
+        return False
+
+    zne_recipe = _build_zne_recipe(features)
+    combined_overhead = zne_recipe.estimated_overhead * features.pec_overhead_estimate
+    return combined_overhead <= COMPOSITE_MAX_OVERHEAD
 
 
 # ---------------------------------------------------------------------------
@@ -496,10 +582,10 @@ def recommend(
     """Select the optimal error mitigation recipe for a circuit.
 
     When *technique* is ``None`` (the default), the engine checks
-    techniques in priority order: PEC (if noise model available, shallow,
-    low overhead), CDR (if non-Clifford fraction > threshold, moderate
-    depth), then ZNE rules.  A conservative LinearFactory fallback is
-    used if no rule matches.
+    techniques in priority order: composite (for moderate PEC-eligible
+    circuits), PEC (if noise model available, shallow, low overhead), CDR
+    (if non-Clifford fraction > threshold, moderate depth), then ZNE rules.
+    A conservative LinearFactory fallback is used if no rule matches.
 
     Parameters
     ----------
@@ -508,8 +594,8 @@ def recommend(
     rules:
         Optional custom rule list.  Defaults to :data:`DEFAULT_RULES`.
     technique:
-        Force a specific technique: ``"pec"``, ``"cdr"``, or ``"zne"``.
-        When ``None``, the engine auto-selects.
+        Force a specific technique: ``"pec"``, ``"cdr"``, ``"composite"``,
+        or ``"zne"``. When ``None``, the engine auto-selects.
 
     Returns
     -------
@@ -531,11 +617,11 @@ def recommend(
     'LinearFactory'
     """
     # --- validate technique ---------------------------------------------------
-    _valid_techniques = {"zne", "pec", "cdr", None}
+    _valid_techniques = {"zne", "pec", "cdr", "composite", None}
     if technique not in _valid_techniques:
         raise ValueError(
             f"Unknown technique {technique!r}. "
-            f"Must be 'zne', 'pec', 'cdr', or None."
+            f"Must be 'zne', 'pec', 'cdr', 'composite', or None."
         )
 
     # --- technique override --------------------------------------------------
@@ -543,21 +629,16 @@ def recommend(
         return _build_pec_recipe(features)
     if technique == "cdr":
         return _build_cdr_recipe(features)
+    if technique == "composite":
+        return _build_composite_recipe(features, rules)
 
-    # --- auto-select: try PEC first, then CDR --------------------------------
+    # --- auto-select: try composite, PEC, then CDR ---------------------------
+    if technique is None and _should_use_composite(features):
+        return _build_composite_recipe(features, rules)
     if technique is None and _should_use_pec(features):
         return _build_pec_recipe(features)
     if technique is None and _should_use_cdr(features):
         return _build_cdr_recipe(features)
 
     # --- ZNE rule chain ------------------------------------------------------
-    if rules is None:
-        active_rules = DEFAULT_RULES
-    else:
-        active_rules = tuple(rules)
-
-    for predicate, builder in active_rules:
-        if predicate(features):
-            return builder(features)
-
-    return _build_fallback_recipe(features)
+    return _build_zne_recipe(features, rules)
