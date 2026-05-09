@@ -502,6 +502,25 @@ def _make_pec_recipe() -> MitigationRecipe:
     )
 
 
+def _make_composite_recipe() -> MitigationRecipe:
+    zne = _make_richardson_recipe()
+    pec = _make_pec_recipe()
+    return MitigationRecipe(
+        technique="composite",
+        factory_name="",
+        scale_factors=(),
+        factory_kwargs={},
+        scaling_method="",
+        components=(zne, pec),
+        rationale=(
+            "Composite selected for a moderate circuit with manageable PEC cost.",
+            "PEC corrects each scaled circuit before ZNE extrapolates residual bias.",
+        ),
+        noise_category="moderate",
+        estimated_overhead=zne.estimated_overhead * pec.estimated_overhead,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests: PEC import correctness
 # ---------------------------------------------------------------------------
@@ -650,6 +669,51 @@ class TestPECExplainMode:
     ) -> None:
         code = generate_code(_make_pec_recipe(), shallow_features, explain=False)
         assert "matches the expected hardware noise" not in code
+
+
+# ---------------------------------------------------------------------------
+# Tests: Composite codegen
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeCodegen:
+    """Verify ZNE-over-PEC generated code is real runnable Python."""
+
+    def test_composite_imports_both_techniques(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_composite_recipe(), moderate_features)
+        assert "from mitiq.zne import execute_with_zne" in code
+        assert "from mitiq.pec import execute_with_pec" in code
+        assert "represent_operations_in_circuit_with_local_depolarizing_noise" in code
+
+    def test_composite_header_names_pipeline(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_composite_recipe(), moderate_features)
+        assert "Recommendation: Composite (ZNE over PEC)" in code
+
+    def test_composite_wraps_pec_executor_inside_zne(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_composite_recipe(), moderate_features)
+        assert "def pec_executor(circuit):" in code
+        assert "mitigated_value = execute_with_zne(" in code
+        assert "    pec_executor," in code
+        assert "execute_with_pec(" in code
+
+    def test_composite_code_compiles(self, moderate_features: CircuitFeatures) -> None:
+        code = generate_code(_make_composite_recipe(), moderate_features)
+        compile(code, "<emrg-composite-test>", "exec")
+
+    def test_composite_explain_mentions_combined_overhead(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(
+            _make_composite_recipe(), moderate_features, explain=True
+        )
+        assert "Rationale:" in code
+        assert "Combined estimated overhead" in code
 
 
 # ---------------------------------------------------------------------------

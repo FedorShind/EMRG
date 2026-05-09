@@ -58,12 +58,16 @@ def _render_header(
         "#",
         "# Recommendation: "
         + (
-            "PEC (Probabilistic Error Cancellation)"
-            if recipe.technique == "pec"
+            "Composite (ZNE over PEC)"
+            if recipe.technique == "composite"
             else (
-                "CDR (Clifford Data Regression)"
-                if recipe.technique == "cdr"
-                else f"{recipe.factory_name} + {recipe.scaling_method}"
+                "PEC (Probabilistic Error Cancellation)"
+                if recipe.technique == "pec"
+                else (
+                    "CDR (Clifford Data Regression)"
+                    if recipe.technique == "cdr"
+                    else f"{recipe.factory_name} + {recipe.scaling_method}"
+                )
             )
         ),
     ]
@@ -89,7 +93,12 @@ def _render_imports(recipe: MitigationRecipe) -> str:
     return "\n".join(lines)
 
 
-def _render_factory(recipe: MitigationRecipe, explain: bool) -> str:
+def _render_factory(
+    recipe: MitigationRecipe,
+    explain: bool,
+    *,
+    variable_name: str = "factory",
+) -> str:
     """Render the factory construction statement."""
     lines: list[str] = []
 
@@ -108,7 +117,7 @@ def _render_factory(recipe: MitigationRecipe, explain: bool) -> str:
         kwargs_parts.append(f"{key}={value!r}")
 
     constructor = f"{recipe.factory_name}({', '.join(kwargs_parts)})"
-    lines.append(f"factory = {constructor}")
+    lines.append(f"{variable_name} = {constructor}")
 
     return "\n".join(lines)
 
@@ -454,6 +463,167 @@ def _generate_cdr_code(
 
 
 # ---------------------------------------------------------------------------
+# Composite renderers
+# ---------------------------------------------------------------------------
+
+
+def _get_composite_components(
+    recipe: MitigationRecipe,
+) -> tuple[MitigationRecipe, MitigationRecipe]:
+    """Return ``(zne_recipe, pec_recipe)`` from a composite recipe."""
+    if len(recipe.components) != 2:
+        raise ValueError("Composite recipes require ZNE and PEC components.")
+
+    zne_recipe, pec_recipe = recipe.components
+    if zne_recipe.technique != "zne" or pec_recipe.technique != "pec":
+        raise ValueError("Composite recipes must contain ZNE then PEC components.")
+    return zne_recipe, pec_recipe
+
+
+def _render_composite_imports(zne_recipe: MitigationRecipe) -> str:
+    """Render imports for a ZNE-over-PEC composite recipe."""
+    return "\n".join(
+        [
+            "from mitiq.zne import execute_with_zne",
+            f"from mitiq.zne.inference import {zne_recipe.factory_name}",
+            f"from mitiq.zne.scaling import {zne_recipe.scaling_method}",
+            "",
+            "from mitiq.pec import execute_with_pec",
+            "from mitiq.pec.representations.depolarizing import (",
+            "    represent_operations_in_circuit_with_local_depolarizing_noise,",
+            ")",
+        ]
+    )
+
+
+def _render_composite_setup(
+    zne_recipe: MitigationRecipe,
+    pec_recipe: MitigationRecipe,
+    explain: bool,
+) -> str:
+    """Render ZNE factory and PEC sampling configuration."""
+    noise_level = pec_recipe.factory_kwargs.get("noise_level", 0.01)
+    num_samples = pec_recipe.factory_kwargs.get("num_samples", 100)
+
+    lines: list[str] = []
+    if explain:
+        lines.append("# ZNE controls the outer extrapolation over scaled circuits.")
+    lines.append(
+        _render_factory(zne_recipe, explain=False, variable_name="zne_factory")
+    )
+    lines.append("")
+
+    if explain:
+        lines.append("# PEC corrects each scaled circuit before extrapolation.")
+    lines.extend(
+        [
+            f"noise_level = {noise_level}",
+            f"num_samples = {num_samples}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_composite_pec_executor(explain: bool) -> str:
+    """Render the inner PEC executor used by the outer ZNE call."""
+    lines: list[str] = []
+    if explain:
+        lines.append(
+            "# This executor is called by ZNE for every noise-scaled circuit."
+        )
+        lines.append(
+            "# It applies PEC to the scaled circuit using the base backend executor."
+        )
+
+    lines.extend(
+        [
+            "def pec_executor(circuit):",
+            '    """Apply PEC to one noise-scaled circuit."""',
+            "    representations = (",
+            "        represent_operations_in_circuit_with_local_depolarizing_noise(",
+            "            circuit,",
+            "            noise_level=noise_level,",
+            "        )",
+            "    )",
+            "    return execute_with_pec(",
+            "        circuit,",
+            "        execute,",
+            "        representations=representations,",
+            "        num_samples=num_samples,",
+            "    )",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_composite_execution(
+    recipe: MitigationRecipe,
+    zne_recipe: MitigationRecipe,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Render the outer execute_with_zne call and result print."""
+    lines: list[str] = []
+
+    if explain:
+        lines.append("# Run ZNE over the PEC-corrected scaled circuits.")
+        lines.append(
+            f"# Combined estimated overhead: ~{recipe.estimated_overhead:.1f}x "
+            "the base shot count."
+        )
+
+    lines.extend(
+        [
+            "mitigated_value = execute_with_zne(",
+            f"    {circuit_name},",
+            "    pec_executor,",
+            "    factory=zne_factory,",
+            f"    scale_noise={zne_recipe.scaling_method},",
+            ")",
+            "",
+            'print(f"Mitigated expectation value: {mitigated_value}")',
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _generate_composite_code(
+    recipe: MitigationRecipe,
+    features: CircuitFeatures,
+    circuit_name: str,
+    explain: bool,
+) -> str:
+    """Assemble sections for a ZNE-over-PEC composite recipe."""
+    zne_recipe, pec_recipe = _get_composite_components(recipe)
+    sections = [
+        _render_header(recipe, features, explain),
+        "",
+        _render_composite_imports(zne_recipe),
+        "",
+        _render_composite_setup(zne_recipe, pec_recipe, explain),
+    ]
+
+    param_warning = _render_parameter_warning(features)
+    if param_warning is not None:
+        sections.append("")
+        sections.append(param_warning)
+
+    sections.extend(
+        [
+            "",
+            _render_executor(explain),
+            "",
+            _render_composite_pec_executor(explain),
+            "",
+            _render_composite_execution(recipe, zne_recipe, circuit_name, explain),
+            "",
+        ]
+    )
+
+    return "\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -518,6 +688,8 @@ def generate_code(
         return _generate_pec_code(recipe, features, circuit_name, explain)
     if recipe.technique == "cdr":
         return _generate_cdr_code(recipe, features, circuit_name, explain)
+    if recipe.technique == "composite":
+        return _generate_composite_code(recipe, features, circuit_name, explain)
     return _generate_zne_code(recipe, features, circuit_name, explain)
 
 
