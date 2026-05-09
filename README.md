@@ -13,7 +13,7 @@ EMRG analyzes a quantum circuit and generates ready-to-run [Mitiq](https://mitiq
 
 ## Why EMRG?
 
-ZNE, PEC, CDR, and composite pipelines can boost fidelity 2--10x on noisy hardware, but each has different requirements and tradeoffs. Choosing the right technique for a given circuit means evaluating depth, gate composition, non-Clifford fraction, noise model availability, and sampling overhead. EMRG automates this: give it a circuit, get back runnable mitigation code with rationale for every parameter choice.
+No single mitigation technique fits every NISQ circuit. ZNE needs useful noise-scaling behavior, PEC needs a noise model and manageable sampling overhead, CDR needs enough non-Clifford structure to train against, and composite ZNE-over-PEC is only worth its cost on moderate-depth PEC-eligible circuits. EMRG automates that choice: give it a circuit, get back runnable mitigation code with rationale for every parameter choice.
 
 ## How It Works
 ```
@@ -23,10 +23,10 @@ Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] -->
 
 1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file.
 2. **Extract Features** -- Depth, gate counts, noise factor, non-Clifford fraction, PEC overhead, layer heterogeneity.
-3. **Select Technique** -- First match wins: Composite > PEC > CDR > ZNE, based on circuit characteristics.
+3. **Select Technique** -- Use priority rules: composite for eligible moderate-depth circuits, PEC for shallow low-overhead noise-model cases, CDR for non-Clifford-heavy circuits, otherwise ZNE.
 4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
 
-### Heuristic Rules (v0.3)
+### Heuristic Rules (v0.3.2)
 
 | Circuit Profile | Technique | Configuration | Rationale |
 |---|---|---|---|
@@ -190,7 +190,7 @@ EMRG/
 │   ├── preview.py       # Simulation preview engine
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 366+ tests, 99% coverage
+├── tests/               # 385 tests, 96% coverage
 ├── docs/
 │   ├── examples/        # Example circuits (Python + QASM)
 │   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
@@ -317,7 +317,7 @@ python benchmarks/run_benchmark.py
 - [x] Layerwise Richardson integration
 - [x] `--preview` mode (noisy simulation + before/after comparison)
 - [x] Expanded tutorials (VQE, QAOA)
-- [x] 366+ tests, 99% coverage, zero lint warnings
+- [x] 385 tests, 96% coverage, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)
