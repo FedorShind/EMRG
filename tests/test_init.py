@@ -161,9 +161,7 @@ class TestGenerateRecipePEC:
         assert result.recipe.technique == "zne"
         assert "execute_with_zne" in result.code
 
-    def test_zne_override_with_noise_model(
-        self, bell_circuit: QuantumCircuit
-    ) -> None:
+    def test_zne_override_with_noise_model(self, bell_circuit: QuantumCircuit) -> None:
         """technique='zne' forces ZNE even with noise model available."""
         result = generate_recipe(
             bell_circuit, technique="zne", noise_model_available=True
@@ -185,9 +183,7 @@ class TestGenerateRecipePEC:
 class TestGenerateRecipeComposite:
     """Verify composite integration through the public API."""
 
-    def test_composite_technique_override(
-        self, bell_circuit: QuantumCircuit
-    ) -> None:
+    def test_composite_technique_override(self, bell_circuit: QuantumCircuit) -> None:
         result = generate_recipe(
             bell_circuit, technique="composite", noise_model_available=True
         )
@@ -205,9 +201,7 @@ class TestGenerateRecipeComposite:
         assert result.recipe.technique == "composite"
         assert len(result.recipe.components) == 2
 
-    def test_composite_code_is_valid_python(
-        self, bell_circuit: QuantumCircuit
-    ) -> None:
+    def test_composite_code_is_valid_python(self, bell_circuit: QuantumCircuit) -> None:
         result = generate_recipe(
             bell_circuit, technique="composite", noise_model_available=True
         )

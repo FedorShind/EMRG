@@ -74,6 +74,10 @@ emrg generate circuit.qasm --technique pec --noise-model
 emrg generate circuit.qasm --technique composite --noise-model
 emrg generate circuit.qasm --technique cdr
 
+# Forced techniques bypass automatic viability checks. EMRG still returns the
+# requested recipe, but generated output includes warnings when the circuit
+# falls outside the automatic selection criteria.
+
 # Preview: simulate and compare before/after mitigation
 emrg generate circuit.qasm --preview
 
@@ -190,7 +194,7 @@ EMRG/
 │   ├── preview.py       # Simulation preview engine
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 398 tests, 95% coverage
+├── tests/               # 407 tests, 95% coverage
 ├── docs/
 │   ├── examples/        # Example circuits (Python + QASM)
 │   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
@@ -317,7 +321,7 @@ python benchmarks/run_benchmark.py
 - [x] Layerwise Richardson integration
 - [x] `--preview` mode (noisy simulation + before/after comparison)
 - [x] Expanded tutorials (VQE, QAOA)
-- [x] 398 tests, 95% coverage, zero lint warnings
+- [x] 407 tests, 95% coverage, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)

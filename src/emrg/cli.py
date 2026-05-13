@@ -21,7 +21,7 @@ import click
 from emrg._version import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
-from emrg.heuristics import recommend
+from emrg.heuristics import MitigationRecipe, recommend
 
 if TYPE_CHECKING:
     from qiskit import QuantumCircuit
@@ -116,6 +116,12 @@ def _format_features_table(features: CircuitFeatures) -> str:
         f"  Noise model avail:   {features.noise_model_available}",
     ]
     return "\n".join(lines)
+
+
+def _echo_recipe_warnings(recipe: MitigationRecipe) -> None:
+    """Emit recipe warnings to stderr for non-stdout generated files."""
+    for warning in recipe.warnings:
+        click.echo(f"Warning: {warning}", err=True)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +232,7 @@ def generate(
         except OSError as exc:
             raise click.ClickException(f"Cannot write to file: {exc}") from exc
         click.echo(f"Written to {output_path}")
+        _echo_recipe_warnings(recipe)
     else:
         click.echo(code)
 

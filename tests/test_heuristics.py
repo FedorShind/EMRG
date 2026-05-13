@@ -366,6 +366,14 @@ class TestMitigationRecipeDataclass:
         )
         assert recipe.scaling_method == "fold_global"
 
+    def test_default_warnings_empty(self) -> None:
+        recipe = MitigationRecipe(
+            technique="zne",
+            factory_name="LinearFactory",
+            scale_factors=(1.0, 2.0),
+        )
+        assert recipe.warnings == ()
+
 
 # ---------------------------------------------------------------------------
 # Tests: DEFAULT_RULES structure
@@ -476,6 +484,7 @@ class TestPECRecommend:
         )
         recipe = recommend(f)
         assert recipe.technique == "pec"
+        assert recipe.warnings == ()
 
     def test_auto_selects_zne_for_ineligible(self) -> None:
         f = _make_features(
@@ -485,6 +494,7 @@ class TestPECRecommend:
         )
         recipe = recommend(f)
         assert recipe.technique == "zne"
+        assert recipe.warnings == ()
 
     def test_technique_pec_forces_pec(self) -> None:
         """technique='pec' forces PEC even when conditions are not met."""
@@ -496,6 +506,17 @@ class TestPECRecommend:
         )
         recipe = recommend(f, technique="pec")
         assert recipe.technique == "pec"
+        assert recipe.warnings
+
+    def test_forced_pec_without_noise_model_warns(self) -> None:
+        f = _make_features(
+            depth=10,
+            noise_model_available=False,
+            pec_overhead_estimate=50.0,
+        )
+        recipe = recommend(f, technique="pec")
+        assert recipe.technique == "pec"
+        assert any("noise model" in warning.lower() for warning in recipe.warnings)
 
     def test_technique_zne_forces_zne(self) -> None:
         """technique='zne' forces ZNE even when PEC conditions are met."""
@@ -506,6 +527,7 @@ class TestPECRecommend:
         )
         recipe = recommend(f, technique="zne")
         assert recipe.technique == "zne"
+        assert recipe.warnings == ()
 
     def test_auto_none_is_default(self) -> None:
         """technique=None is the default auto-detection behavior."""
@@ -542,7 +564,8 @@ class TestPECRecommend:
         assert recipe.technique == "composite"
         assert len(recipe.components) == 2
         assert [component.technique for component in recipe.components] == [
-            "zne", "pec",
+            "zne",
+            "pec",
         ]
 
 
@@ -588,6 +611,7 @@ class TestCompositeRecommend:
         )
         recipe = recommend(f)
         assert recipe.technique == "pec"
+        assert recipe.warnings == ()
 
     def test_composite_override_works_without_noise_model_flag(self) -> None:
         f = _make_features(
@@ -600,6 +624,31 @@ class TestCompositeRecommend:
         assert recipe.technique == "composite"
         assert recipe.components[0].technique == "zne"
         assert recipe.components[1].technique == "pec"
+        assert any("noise model" in warning.lower() for warning in recipe.warnings)
+
+    def test_forced_composite_with_impractical_overhead_warns(self) -> None:
+        f = _make_features(
+            depth=25,
+            noise_category="moderate",
+            noise_model_available=False,
+            pec_overhead_estimate=500.0,
+        )
+        recipe = recommend(f, technique="composite")
+        warning_text = " ".join(recipe.warnings).lower()
+        assert recipe.technique == "composite"
+        assert "noise model" in warning_text
+        assert "combined overhead" in warning_text
+
+    def test_auto_refuses_composite_with_impractical_overhead(self) -> None:
+        f = _make_features(
+            depth=25,
+            noise_category="moderate",
+            noise_model_available=True,
+            pec_overhead_estimate=500.0,
+        )
+        recipe = recommend(f)
+        assert recipe.technique == "pec"
+        assert recipe.warnings == ()
 
 
 # ---------------------------------------------------------------------------
@@ -815,7 +864,9 @@ class TestLayerwiseRichardson:
     def test_depth_14_not_layerwise(self) -> None:
         """Below LAYERWISE_MIN_DEPTH -> falls to shallow rule."""
         f = _make_features(
-            depth=14, layer_heterogeneity=5.0, multi_qubit_gate_count=3,
+            depth=14,
+            layer_heterogeneity=5.0,
+            multi_qubit_gate_count=3,
         )
         recipe = recommend(f)
         assert recipe.factory_name == "LinearFactory"
@@ -824,7 +875,9 @@ class TestLayerwiseRichardson:
     def test_depth_51_gets_poly(self) -> None:
         """Above LAYERWISE_MAX_DEPTH -> deep rule takes priority."""
         f = _make_features(
-            depth=51, layer_heterogeneity=5.0, noise_category="moderate",
+            depth=51,
+            layer_heterogeneity=5.0,
+            noise_category="moderate",
         )
         recipe = recommend(f)
         assert recipe.factory_name == "PolyFactory"

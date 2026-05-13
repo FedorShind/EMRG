@@ -74,7 +74,9 @@ def test_a1():
         record(CAT, "A1 empty circuit", True, f"ValueError: {e}")
     except Exception as e:
         record(
-            CAT, "A1 empty circuit", False,
+            CAT,
+            "A1 empty circuit",
+            False,
             f"Wrong: {type(e).__name__}: {e}",
         )
 
@@ -90,7 +92,9 @@ def test_a2():
         record(CAT, "A2 measurement-only", True, f"ValueError: {e}")
     except Exception as e:
         record(
-            CAT, "A2 measurement-only", False,
+            CAT,
+            "A2 measurement-only",
+            False,
             f"Wrong: {type(e).__name__}: {e}",
         )
 
@@ -102,8 +106,7 @@ def test_a3():
     qc.measure_all()
     result = generate_recipe(qc, preview=True)
     ok = result.preview is not None and result.preview.ideal_value is not None
-    record(CAT, "A3 single gate 1q", ok,
-           f"ideal={result.preview.ideal_value}")
+    record(CAT, "A3 single gate 1q", ok, f"ideal={result.preview.ideal_value}")
 
 
 def test_a4():
@@ -138,8 +141,7 @@ def test_a6():
     result = generate_recipe(qc, preview=True)
     w = result.preview.warning
     ok = w is not None and "skip" in w.lower()
-    record(CAT, "A6 exactly 11 qubits", ok,
-           f"warning={w[:60] if w else 'None'}...")
+    record(CAT, "A6 exactly 11 qubits", ok, f"warning={w[:60] if w else 'None'}...")
 
 
 def test_a7():
@@ -154,8 +156,7 @@ def test_a7():
     elapsed = time.time() - t0
     w = result.preview.warning or ""
     ok = "skip" in w.lower() and elapsed < 2
-    record(CAT, "A7 10q deep (depth guard)", ok,
-           f"{elapsed:.1f}s, {w[:50]}")
+    record(CAT, "A7 10q deep (depth guard)", ok, f"{elapsed:.1f}s, {w[:50]}")
 
 
 def test_a8():
@@ -166,8 +167,7 @@ def test_a8():
     qc.cx(0, 1)
     qc.measure_all()
     result = generate_recipe(qc, preview=True)
-    ok = (result.preview is not None
-          and result.preview.ideal_value is not None)
+    ok = result.preview is not None and result.preview.ideal_value is not None
     record(CAT, "A8 barriers", ok)
 
 
@@ -177,8 +177,7 @@ def test_a9():
     qc.h(0)
     qc.cx(0, 1)
     result = generate_recipe(qc, preview=True)
-    ok = (result.preview is not None
-          and result.preview.ideal_value is not None)
+    ok = result.preview is not None and result.preview.ideal_value is not None
     record(CAT, "A9 classical regs no meas", ok)
 
 
@@ -189,13 +188,22 @@ def test_a10():
     qc.cx(0, 1)
     qc.measure([0, 1], [0, 1])
     result = generate_recipe(qc, preview=True)
-    ok = (result.preview is not None
-          and result.preview.ideal_value is not None)
+    ok = result.preview is not None and result.preview.ideal_value is not None
     record(CAT, "A10 with measurements", ok)
 
 
-for fn in [test_a1, test_a2, test_a3, test_a4, test_a5, test_a6,
-           test_a7, test_a8, test_a9, test_a10]:
+for fn in [
+    test_a1,
+    test_a2,
+    test_a3,
+    test_a4,
+    test_a5,
+    test_a6,
+    test_a7,
+    test_a8,
+    test_a9,
+    test_a10,
+]:
     run_test(CAT, fn.__doc__ or fn.__name__, fn)
 
 
@@ -224,7 +232,9 @@ def test_b2():
 def test_b3():
     """Observable on nonexistent qubit (Z5 on 3q)."""
     result = generate_recipe(
-        _make_3q(), preview=True, observable="Z5",
+        _make_3q(),
+        preview=True,
+        observable="Z5",
     )
     w = result.preview.warning or ""
     ok = len(w) > 0
@@ -252,7 +262,9 @@ def test_b5():
 def test_b6():
     """Garbage observable string."""
     result = generate_recipe(
-        _make_3q(), preview=True, observable="XYZZY",
+        _make_3q(),
+        preview=True,
+        observable="XYZZY",
     )
     w = result.preview.warning or ""
     ok = len(w) > 0
@@ -306,7 +318,9 @@ def test_c3():
 def test_c4():
     """Negative noise."""
     result = generate_recipe(
-        _make_bell(), preview=True, noise_level=-0.1,
+        _make_bell(),
+        preview=True,
+        noise_level=-0.1,
     )
     w = result.preview.warning
     ok = w is not None or result.preview.ideal_value is not None
@@ -317,7 +331,9 @@ def test_c4():
 def test_c5():
     """Very small noise p=0.0001."""
     result = generate_recipe(
-        _make_bell(), preview=True, noise_level=0.0001,
+        _make_bell(),
+        preview=True,
+        noise_level=0.0001,
     )
     ok = result.preview.ideal_value is not None
     record(CAT, "C5 p=0.0001", ok)
@@ -348,31 +364,34 @@ def test_d1():
     """Force ZNE + preview."""
     result = generate_recipe(_make_3q(), preview=True, technique="zne")
     ok = "zne" in result.preview.technique.lower()
-    record(CAT, "D1 force ZNE", ok,
-           f"technique={result.preview.technique}")
+    record(CAT, "D1 force ZNE", ok, f"technique={result.preview.technique}")
 
 
 def test_d2():
     """Force PEC + preview."""
     result = generate_recipe(
-        _make_3q(), preview=True, technique="pec",
+        _make_3q(),
+        preview=True,
+        technique="pec",
         noise_model_available=True,
     )
     ok = "pec" in result.preview.technique.lower()
-    record(CAT, "D2 force PEC", ok,
-           f"technique={result.preview.technique}")
+    record(CAT, "D2 force PEC", ok, f"technique={result.preview.technique}")
 
 
 def test_d3():
     """Force PEC without noise model + preview."""
     try:
         result = generate_recipe(
-            _make_3q(), preview=True, technique="pec",
+            _make_3q(),
+            preview=True,
+            technique="pec",
             noise_model_available=False,
         )
         ok = result.preview is not None
-        record(CAT, "D3 PEC no noise model", ok,
-               f"technique={result.preview.technique}")
+        record(
+            CAT, "D3 PEC no noise model", ok, f"technique={result.preview.technique}"
+        )
     except Exception as e:
         record(CAT, "D3 PEC no noise model", True, f"Error: {e}")
 
@@ -383,8 +402,7 @@ def test_d4():
         generate_recipe(_make_3q(), preview=True, technique="invalid")
         record(CAT, "D4 invalid technique", False, "No error raised")
     except (ValueError, Exception) as e:
-        record(CAT, "D4 invalid technique", True,
-               f"{type(e).__name__}: {e}")
+        record(CAT, "D4 invalid technique", True, f"{type(e).__name__}: {e}")
 
 
 for fn in [test_d1, test_d2, test_d3, test_d4]:
@@ -421,8 +439,7 @@ def test_e2():
     if unique == 1:
         record(CAT, "E2 PEC seeded", True, "deterministic (seed=42)")
     else:
-        record(CAT, "E2 PEC variance", True,
-               f"{unique} unique values")
+        record(CAT, "E2 PEC variance", True, f"{unique} unique values")
 
 
 for fn in [test_e1, test_e2]:
@@ -515,8 +532,10 @@ for cat, tests in RESULTS.items():
     label = f"  ({failed} FAILED)" if failed else ""
     print(f"  {cat:<30} {passed}/{len(tests)} passed{label}")
 
-print(f"\nTotal: {PASS_COUNT} passed, {FAIL_COUNT} failed "
-      f"out of {PASS_COUNT + FAIL_COUNT}")
+print(
+    f"\nTotal: {PASS_COUNT} passed, {FAIL_COUNT} failed "
+    f"out of {PASS_COUNT + FAIL_COUNT}"
+)
 
 if FAIL_COUNT > 0:
     print("\nFAILED TESTS:")

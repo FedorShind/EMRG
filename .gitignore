@@ -40,7 +40,8 @@ nul
 # Jupyter
 .ipynb_checkpoints/
 
-# Project-local context (not for public repo)
+# Agentic files (not for public repo)
+AGENTS.md
 CLAUDE.md
 INFO.md
 .claude/

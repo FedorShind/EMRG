@@ -138,9 +138,7 @@ class TestRunPreviewPEC:
     """PEC preview execution path."""
 
     def test_pec_path_works(self, vqe_4q_circuit):
-        features = analyze_circuit(
-            vqe_4q_circuit, noise_model_available=True
-        )
+        features = analyze_circuit(vqe_4q_circuit, noise_model_available=True)
         recipe = recommend(features, technique="pec")
         result = run_preview(vqe_4q_circuit, recipe)
 
@@ -151,9 +149,7 @@ class TestRunPreviewPEC:
         assert "approximate" in result.warning.lower()
 
     def test_pec_with_custom_noise(self, vqe_4q_circuit):
-        features = analyze_circuit(
-            vqe_4q_circuit, noise_model_available=True
-        )
+        features = analyze_circuit(vqe_4q_circuit, noise_model_available=True)
         recipe = recommend(features, technique="pec")
         result = run_preview(vqe_4q_circuit, recipe, noise_level=0.02)
 
@@ -328,9 +324,7 @@ class TestGenerateRecipePreview:
         assert result.preview.ideal_value is not None
 
     def test_preview_with_custom_noise(self, bell_circuit):
-        result = generate_recipe(
-            bell_circuit, preview=True, noise_level=0.05
-        )
+        result = generate_recipe(bell_circuit, preview=True, noise_level=0.05)
         assert result.preview.noise_level == 0.05
 
     def test_preview_with_pec(self, bell_circuit):

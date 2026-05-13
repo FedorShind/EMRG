@@ -73,6 +73,12 @@ def _render_header(
         ),
     ]
 
+    if recipe.warnings:
+        lines.append("#")
+        lines.append("# Warnings:")
+        for warning_line in recipe.warnings:
+            lines.append(f"#   - {warning_line}")
+
     if explain and recipe.rationale:
         lines.append("#")
         lines.append("# Rationale:")

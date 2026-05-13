@@ -191,6 +191,7 @@ class TestAnalyze:
             "non_clifford_fraction",
         }
         assert set(data.keys()) == expected_keys
+        assert "warnings" not in data
 
     def test_analyze_json_types(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["analyze", str(BELL_QASM), "--json"])
@@ -360,6 +361,18 @@ class TestGeneratePEC:
         assert result.exit_code == 0
         assert "Rationale:" in result.output
         assert "PEC" in result.output
+
+    def test_generate_forced_pec_without_noise_model_warns(
+        self, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(
+            main,
+            ["generate", str(BELL_QASM), "--technique", "pec"],
+        )
+        assert result.exit_code == 0
+        assert "execute_with_pec" in result.output
+        assert "Warnings:" in result.output
+        assert "noise model" in result.output.lower()
 
     def test_analyze_json_has_pec_fields(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["analyze", str(BELL_QASM), "--json"])

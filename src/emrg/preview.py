@@ -163,8 +163,7 @@ def _classify_observable(observable: str) -> tuple[str, int | None]:
             pass
 
     raise ValueError(
-        f"Invalid observable: {observable!r}. "
-        f"Expected 'Z0', 'Z1', ..., or 'ZZ'."
+        f"Invalid observable: {observable!r}. Expected 'Z0', 'Z1', ..., or 'ZZ'."
     )
 
 
@@ -185,8 +184,7 @@ def _parse_observable(observable: str, n_qubits: int) -> np.ndarray:
     # kind == "z"; _classify_observable guarantees qubit_index is an int.
     if qubit_index is None or qubit_index < 0 or qubit_index >= n_qubits:
         raise ValueError(
-            f"Qubit index {qubit_index} out of range for "
-            f"{n_qubits}-qubit circuit."
+            f"Qubit index {qubit_index} out of range for {n_qubits}-qubit circuit."
         )
     return _z_on_qubit(qubit_index, n_qubits)
 
@@ -207,9 +205,7 @@ def _make_noisy_cirq_circuit(circuit, noise_level: float):
         noisy.append(moment)
         for op in moment.operations:
             nq = len(op.qubits)
-            noisy.append(
-                cirq.depolarize(p=noise_level, n_qubits=nq).on(*op.qubits)
-            )
+            noisy.append(cirq.depolarize(p=noise_level, n_qubits=nq).on(*op.qubits))
     return noisy
 
 
@@ -229,11 +225,7 @@ def _make_executor(noise_level: float, observable_matrix, n_qubits: int):
     # into the string 'float', which Mitiq cannot resolve.
     def executor(circuit):
         sim_circuit = _make_noisy_cirq_circuit(circuit, noise_level)
-        rho = (
-            cirq.DensityMatrixSimulator()
-            .simulate(sim_circuit)
-            .final_density_matrix
-        )
+        rho = cirq.DensityMatrixSimulator().simulate(sim_circuit).final_density_matrix
         return _compute_expectation(rho, observable_matrix)
 
     return executor
@@ -266,9 +258,7 @@ def _run_zne(cirq_circuit, noisy_executor, recipe: MitigationRecipe) -> float:
     }[recipe.factory_name]
 
     extra_kwargs = dict(recipe.factory_kwargs) if recipe.factory_kwargs else {}
-    factory = factory_cls(
-        scale_factors=list(recipe.scale_factors), **extra_kwargs
-    )
+    factory = factory_cls(scale_factors=list(recipe.scale_factors), **extra_kwargs)
 
     scale_fn = {
         "fold_global": fold_global,
@@ -276,7 +266,10 @@ def _run_zne(cirq_circuit, noisy_executor, recipe: MitigationRecipe) -> float:
     }[recipe.scaling_method]
 
     return execute_with_zne(
-        cirq_circuit, noisy_executor, factory=factory, scale_noise=scale_fn,
+        cirq_circuit,
+        noisy_executor,
+        factory=factory,
+        scale_noise=scale_fn,
     )
 
 
@@ -285,19 +278,16 @@ def _run_zne(cirq_circuit, noisy_executor, recipe: MitigationRecipe) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _run_pec(
-    cirq_circuit, noisy_executor, noise_level: float
-) -> float:
+def _run_pec(cirq_circuit, noisy_executor, noise_level: float) -> float:
     """Execute PEC with depolarizing representations."""
     from mitiq.pec import execute_with_pec
     from mitiq.pec.representations.depolarizing import (
         represent_operations_in_circuit_with_local_depolarizing_noise,
     )
 
-    representations = (
-        represent_operations_in_circuit_with_local_depolarizing_noise(
-            cirq_circuit, noise_level=noise_level,
-        )
+    representations = represent_operations_in_circuit_with_local_depolarizing_noise(
+        cirq_circuit,
+        noise_level=noise_level,
     )
 
     return execute_with_pec(
@@ -350,7 +340,11 @@ def _run_composite(
 
 
 def _run_cdr(
-    cirq_circuit, noisy_executor, observable_matrix, n_qubits: int, recipe,
+    cirq_circuit,
+    noisy_executor,
+    observable_matrix,
+    n_qubits: int,
+    recipe,
 ) -> float:
     """Execute CDR with a noiseless simulator for training circuits."""
     from mitiq.cdr import execute_with_cdr
@@ -433,7 +427,8 @@ def run_preview(
     gate_limit = _GATE_LIMITS.get(n_qubits)
     if gate_limit is not None:
         total_gates = sum(
-            count for name, count in qc.count_ops().items()
+            count
+            for name, count in qc.count_ops().items()
             if name not in ("measure", "barrier", "delay", "reset")
         )
         if total_gates > gate_limit:
@@ -488,9 +483,7 @@ def run_preview(
 
         # Mitigated execution using the actual recipe.
         if recipe.technique == "pec":
-            mitigated_value = _run_pec(
-                cirq_circuit, noisy_exec, noise_level
-            )
+            mitigated_value = _run_pec(cirq_circuit, noisy_exec, noise_level)
             warning = (
                 f"PEC results are approximate ({PEC_PREVIEW_SAMPLES} samples). "
                 f"Variance decreases with more samples."
@@ -506,7 +499,11 @@ def run_preview(
             )
         elif recipe.technique == "cdr":
             mitigated_value = _run_cdr(
-                cirq_circuit, noisy_exec, obs_matrix, cirq_n_qubits, recipe,
+                cirq_circuit,
+                noisy_exec,
+                obs_matrix,
+                cirq_n_qubits,
+                recipe,
             )
             num_tc = recipe.factory_kwargs.get(
                 "num_training_circuits", CDR_PREVIEW_TRAINING_CIRCUITS

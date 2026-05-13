@@ -31,7 +31,7 @@ Typical usage::
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -167,6 +167,9 @@ class MitigationRecipe:
             (roughly ``len(scale_factors)``).
         components: Child recipes used by composite techniques. Empty for
             single-technique recipes.
+        warnings: Validation notes for forced techniques that do not satisfy
+            the automatic selection predicates. Empty for normal auto-selected
+            recipes.
     """
 
     technique: str
@@ -178,6 +181,15 @@ class MitigationRecipe:
     noise_category: str = "low"
     estimated_overhead: float = 1.0
     components: tuple[MitigationRecipe, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+
+def _with_warnings(
+    recipe: MitigationRecipe,
+    warnings: Sequence[str],
+) -> MitigationRecipe:
+    """Return *recipe* with immutable warning notes attached."""
+    return replace(recipe, warnings=tuple(warnings))
 
 
 # ---------------------------------------------------------------------------
@@ -238,10 +250,12 @@ def _build_pec_recipe(features: CircuitFeatures) -> MitigationRecipe:
         technique="pec",
         factory_name="",
         scale_factors=(),
-        factory_kwargs=_freeze_kwargs({
-            "num_samples": num_samples,
-            "noise_level": PEC_DEFAULT_NOISE_LEVEL,
-        }),
+        factory_kwargs=_freeze_kwargs(
+            {
+                "num_samples": num_samples,
+                "noise_level": PEC_DEFAULT_NOISE_LEVEL,
+            }
+        ),
         scaling_method="",
         rationale=(
             f"Circuit depth ({features.depth}) <= {PEC_MAX_DEPTH} with "
@@ -257,6 +271,28 @@ def _build_pec_recipe(features: CircuitFeatures) -> MitigationRecipe:
         noise_category=features.noise_category,
         estimated_overhead=features.pec_overhead_estimate,
     )
+
+
+def _forced_pec_warnings(features: CircuitFeatures) -> tuple[str, ...]:
+    """Return validation notes for a forced PEC recipe."""
+    warnings: list[str] = []
+    if not features.noise_model_available:
+        warnings.append(
+            "Forced PEC: no noise model is marked available, so the generated "
+            "depolarizing representations may not match the target backend."
+        )
+    if features.depth > PEC_MAX_DEPTH:
+        warnings.append(
+            f"Forced PEC: circuit depth ({features.depth}) exceeds the "
+            f"automatic PEC limit ({PEC_MAX_DEPTH})."
+        )
+    if features.pec_overhead_estimate >= PEC_MAX_OVERHEAD:
+        warnings.append(
+            f"Forced PEC: estimated sampling overhead "
+            f"({features.pec_overhead_estimate:.1f}) is at or above the "
+            f"automatic PEC limit ({PEC_MAX_OVERHEAD:.0f})."
+        )
+    return tuple(warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -293,10 +329,12 @@ def _build_cdr_recipe(features: CircuitFeatures) -> MitigationRecipe:
         technique="cdr",
         factory_name="",
         scale_factors=(),
-        factory_kwargs=_freeze_kwargs({
-            "num_training_circuits": num_training,
-            "fit_method": "linear",
-        }),
+        factory_kwargs=_freeze_kwargs(
+            {
+                "num_training_circuits": num_training,
+                "fit_method": "linear",
+            }
+        ),
         scaling_method="",
         rationale=(
             f"Circuit has {features.non_clifford_fraction:.0%} non-Clifford "
@@ -314,6 +352,24 @@ def _build_cdr_recipe(features: CircuitFeatures) -> MitigationRecipe:
         noise_category=features.noise_category,
         estimated_overhead=float(num_training),
     )
+
+
+def _forced_cdr_warnings(features: CircuitFeatures) -> tuple[str, ...]:
+    """Return validation notes for a forced CDR recipe."""
+    warnings: list[str] = []
+    if features.non_clifford_fraction <= CDR_NON_CLIFFORD_FRACTION_THRESHOLD:
+        warnings.append(
+            f"Forced CDR: non-Clifford fraction "
+            f"({features.non_clifford_fraction:.0%}) is at or below the "
+            f"automatic CDR threshold "
+            f"({CDR_NON_CLIFFORD_FRACTION_THRESHOLD:.0%})."
+        )
+    if not CDR_MIN_DEPTH <= features.depth <= CDR_MAX_DEPTH:
+        warnings.append(
+            f"Forced CDR: circuit depth ({features.depth}) is outside the "
+            f"automatic CDR range ({CDR_MIN_DEPTH}-{CDR_MAX_DEPTH})."
+        )
+    return tuple(warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -345,9 +401,7 @@ def _build_composite_recipe(
     """Build a composite recipe that runs ZNE over a PEC executor."""
     zne_recipe = _build_zne_recipe(features, rules)
     pec_recipe = _build_pec_recipe(features)
-    combined_overhead = (
-        zne_recipe.estimated_overhead * pec_recipe.estimated_overhead
-    )
+    combined_overhead = zne_recipe.estimated_overhead * pec_recipe.estimated_overhead
     return MitigationRecipe(
         technique="composite",
         factory_name="",
@@ -383,6 +437,53 @@ def _should_use_composite(features: CircuitFeatures) -> bool:
     zne_recipe = _build_zne_recipe(features)
     combined_overhead = zne_recipe.estimated_overhead * features.pec_overhead_estimate
     return combined_overhead <= COMPOSITE_MAX_OVERHEAD
+
+
+def _forced_composite_warnings(
+    features: CircuitFeatures,
+    rules: Sequence[Rule] | None = None,
+) -> tuple[str, ...]:
+    """Return validation notes for a forced composite recipe."""
+    warnings: list[str] = []
+
+    if not features.noise_model_available:
+        warnings.append(
+            "Forced composite: no noise model is marked available, so the PEC "
+            "component may not match the target backend."
+        )
+    if features.pec_overhead_estimate >= PEC_MAX_OVERHEAD:
+        warnings.append(
+            f"Forced composite: PEC overhead "
+            f"({features.pec_overhead_estimate:.1f}) is at or above the "
+            f"automatic PEC limit ({PEC_MAX_OVERHEAD:.0f})."
+        )
+    if features.noise_category == "low":
+        warnings.append(
+            "Forced composite: automatic selection skips low-noise circuits "
+            "because composite overhead is usually not justified."
+        )
+    if _should_use_cdr(features):
+        warnings.append(
+            "Forced composite: automatic selection would prefer CDR for this "
+            "non-Clifford circuit profile."
+        )
+    if not COMPOSITE_MIN_DEPTH <= features.depth <= COMPOSITE_MAX_DEPTH:
+        warnings.append(
+            f"Forced composite: circuit depth ({features.depth}) is outside "
+            f"the automatic composite range "
+            f"({COMPOSITE_MIN_DEPTH}-{COMPOSITE_MAX_DEPTH})."
+        )
+
+    zne_recipe = _build_zne_recipe(features, rules)
+    combined_overhead = zne_recipe.estimated_overhead * features.pec_overhead_estimate
+    if combined_overhead > COMPOSITE_MAX_OVERHEAD:
+        warnings.append(
+            f"Forced composite: combined overhead ({combined_overhead:.1f}) "
+            f"exceeds the automatic composite limit "
+            f"({COMPOSITE_MAX_OVERHEAD:.0f})."
+        )
+
+    return tuple(warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -626,11 +727,18 @@ def recommend(
 
     # --- technique override --------------------------------------------------
     if technique == "pec":
-        return _build_pec_recipe(features)
+        return _with_warnings(
+            _build_pec_recipe(features), _forced_pec_warnings(features)
+        )
     if technique == "cdr":
-        return _build_cdr_recipe(features)
+        return _with_warnings(
+            _build_cdr_recipe(features), _forced_cdr_warnings(features)
+        )
     if technique == "composite":
-        return _build_composite_recipe(features, rules)
+        return _with_warnings(
+            _build_composite_recipe(features, rules),
+            _forced_composite_warnings(features, rules),
+        )
 
     # --- auto-select: try composite, PEC, then CDR ---------------------------
     if technique is None and _should_use_composite(features):

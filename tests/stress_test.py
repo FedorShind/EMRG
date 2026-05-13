@@ -132,9 +132,7 @@ class TestInputEdgeCases:
         qc.h(0)
         qc.cx(0, 1)
         qc.measure_all()
-        result = generate_recipe(
-            qc, technique="pec", noise_model_available=True
-        )
+        result = generate_recipe(qc, technique="pec", noise_model_available=True)
         assert result.recipe.technique == "pec"
         compile(result.code, "<stress-force-pec>", "exec")
 
@@ -183,10 +181,12 @@ class TestInputEdgeCases:
         features = analyze_circuit(qc)
         result = generate_recipe(qc)
         # Print for manual inspection
-        print(f"\n  Heterogeneous circuit: depth={features.depth}, "
-              f"het={features.layer_heterogeneity:.4f}, "
-              f"factory={result.recipe.factory_name}, "
-              f"scaling={result.recipe.scaling_method}")
+        print(
+            f"\n  Heterogeneous circuit: depth={features.depth}, "
+            f"het={features.layer_heterogeneity:.4f}, "
+            f"factory={result.recipe.factory_name}, "
+            f"scaling={result.recipe.scaling_method}"
+        )
 
     def test_homogeneous_circuit(self) -> None:
         """Circuit with uniform CX density -> fold_global."""
@@ -201,10 +201,12 @@ class TestInputEdgeCases:
         qc.measure_all()
         features = analyze_circuit(qc)
         result = generate_recipe(qc)
-        print(f"\n  Homogeneous circuit: depth={features.depth}, "
-              f"het={features.layer_heterogeneity:.4f}, "
-              f"factory={result.recipe.factory_name}, "
-              f"scaling={result.recipe.scaling_method}")
+        print(
+            f"\n  Homogeneous circuit: depth={features.depth}, "
+            f"het={features.layer_heterogeneity:.4f}, "
+            f"factory={result.recipe.factory_name}, "
+            f"scaling={result.recipe.scaling_method}"
+        )
         # Uniform layers should have low heterogeneity
         # Whether it gets fold_global depends on exact depth/het values
 
@@ -227,9 +229,7 @@ class TestCLIStress:
         assert "File not found" in result.output
 
     def test_analyze_json_all_fields(self, runner: CliRunner) -> None:
-        result = runner.invoke(
-            cli_main, ["analyze", str(_BELL_QASM), "--json"]
-        )
+        result = runner.invoke(cli_main, ["analyze", str(_BELL_QASM), "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "layer_heterogeneity" in data
@@ -253,9 +253,7 @@ class TestCLIStress:
         assert "execute_with_pec" in result.output
 
     def test_generate_explain(self, runner: CliRunner) -> None:
-        result = runner.invoke(
-            cli_main, ["generate", str(_BELL_QASM), "--explain"]
-        )
+        result = runner.invoke(cli_main, ["generate", str(_BELL_QASM), "--explain"])
         assert result.exit_code == 0
         assert "Rationale:" in result.output
 
@@ -329,6 +327,7 @@ class TestCodeValidation:
         assert recipe.factory_name == "RichardsonFactory"
         assert recipe.scaling_method == "fold_gates_at_random"
         from emrg.codegen import generate_code
+
         code = generate_code(recipe, features)
         compile(code, "<validate-layerwise>", "exec")
 
@@ -373,14 +372,18 @@ class TestHeuristicBoundaries:
 
     def test_pec_boundary_depth_30(self) -> None:
         f = _make_features(
-            depth=30, noise_model_available=True, pec_overhead_estimate=50.0,
+            depth=30,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
         )
         recipe = recommend(f)
         assert recipe.technique == "pec"
 
     def test_pec_boundary_depth_31(self) -> None:
         f = _make_features(
-            depth=31, noise_model_available=True, pec_overhead_estimate=50.0,
+            depth=31,
+            noise_model_available=True,
+            pec_overhead_estimate=50.0,
         )
         recipe = recommend(f)
         assert recipe.technique == "zne"
@@ -397,14 +400,18 @@ class TestHeuristicBoundaries:
 
     def test_pec_overhead_999(self) -> None:
         f = _make_features(
-            depth=10, noise_model_available=True, pec_overhead_estimate=999.0,
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=999.0,
         )
         recipe = recommend(f)
         assert recipe.technique == "pec"
 
     def test_pec_overhead_1001(self) -> None:
         f = _make_features(
-            depth=10, noise_model_available=True, pec_overhead_estimate=1001.0,
+            depth=10,
+            noise_model_available=True,
+            pec_overhead_estimate=1001.0,
         )
         recipe = recommend(f)
         assert recipe.technique == "zne"
@@ -436,9 +443,11 @@ class TestPerformance:
             result = generate_recipe(qc)
             elapsed = time.perf_counter() - t0
 
-        print(f"\n  100-qubit circuit: {elapsed:.3f}s "
-              f"(depth={result.features.depth}, "
-              f"gates={result.features.total_gate_count})")
+        print(
+            f"\n  100-qubit circuit: {elapsed:.3f}s "
+            f"(depth={result.features.depth}, "
+            f"gates={result.features.total_gate_count})"
+        )
         assert elapsed < 1.0, f"generate_recipe took {elapsed:.3f}s (>1s)"
 
 

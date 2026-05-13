@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 from qiskit import QuantumCircuit
 
@@ -202,6 +204,21 @@ class TestHeader:
         code = generate_code(_make_linear_recipe(), shallow_features)
         assert "Recommendation: LinearFactory + fold_global" in code
 
+    def test_contains_forced_warning_comments(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        recipe = MitigationRecipe(
+            technique="pec",
+            factory_name="",
+            scale_factors=(),
+            factory_kwargs={"num_samples": 100, "noise_level": 0.01},
+            scaling_method="",
+            warnings=("Forced PEC: no noise model is available.",),
+        )
+        code = generate_code(recipe, shallow_features)
+        assert "# Warnings:" in code
+        assert "#   - Forced PEC: no noise model is available." in code
+
     def test_parametric_shows_parameters(
         self, parametric_features: CircuitFeatures
     ) -> None:
@@ -360,6 +377,38 @@ class TestSyntaxValidity:
         """The entire generated file must be compilable Python."""
         code = generate_code(_make_linear_recipe(), shallow_features)
         compile(code, "<emrg-test-full>", "exec")
+
+    @pytest.mark.filterwarnings("ignore:The input circuit is very short")
+    def test_generated_zne_code_runs_with_controlled_executor(self) -> None:
+        """Full ZNE smoke: imports, factory, scaling, and executor contract."""
+        qc = QuantumCircuit(2, 2)
+        qc.h(0)
+        qc.cx(0, 1)
+        qc.measure([0, 1], [0, 1])
+
+        features = analyze_circuit(qc)
+        recipe = recommend(features, technique="zne")
+        code = generate_code(recipe, features)
+
+        executor_start = code.index("def execute(circuit):")
+        execution_start = code.index("\n\nmitigated_value = execute_with_zne(")
+        patched_code = (
+            code[:executor_start]
+            + "calls = []\n"
+            + "def execute(circuit):\n"
+            + "    calls.append(circuit.depth())\n"
+            + "    return 0.5 + 0.01 * len(calls)\n"
+            + code[execution_start:]
+        )
+
+        namespace: dict[str, object] = {"circuit": qc}
+        exec(compile(patched_code, "<emrg-generated-zne-smoke>", "exec"), namespace)
+
+        calls = namespace["calls"]
+        mitigated_value = namespace["mitigated_value"]
+        assert len(calls) == len(recipe.scale_factors)
+        assert all(isinstance(depth, int) for depth in calls)
+        assert math.isfinite(mitigated_value)
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +649,11 @@ class TestPECExecution:
 # ---------------------------------------------------------------------------
 # Tests: PEC syntax validity
 # ---------------------------------------------------------------------------
+
+# PEC and composite stay at compile/import coverage in this cleanup pass.
+# Runtime coverage is deferred because PEC sampling is stochastic and composite
+# layers that stochastic path inside ZNE; full execution belongs with later
+# Mitiq integration work.
 
 
 class TestPECSyntaxValidity:

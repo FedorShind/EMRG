@@ -93,13 +93,13 @@ def _make_clifford_rotation_circuit():
     from qiskit import QuantumCircuit
 
     qc = QuantumCircuit(2, 2)
-    qc.rz(math.pi / 2, 0)      # S gate equivalent -> Clifford
-    qc.rz(math.pi, 1)           # Z gate equivalent -> Clifford
-    qc.rx(math.pi, 0)           # X gate equivalent -> Clifford
-    qc.ry(math.pi / 2, 1)       # Clifford
+    qc.rz(math.pi / 2, 0)  # S gate equivalent -> Clifford
+    qc.rz(math.pi, 1)  # Z gate equivalent -> Clifford
+    qc.rx(math.pi, 0)  # X gate equivalent -> Clifford
+    qc.ry(math.pi / 2, 1)  # Clifford
     qc.cx(0, 1)
     qc.rz(3 * math.pi / 2, 0)  # Sdg equivalent -> Clifford
-    qc.rz(2 * math.pi, 1)       # Identity -> Clifford
+    qc.rz(2 * math.pi, 1)  # Identity -> Clifford
     qc.measure_all()
     return qc
 
@@ -116,10 +116,12 @@ def _make_cdr_recipe(
         technique="cdr",
         factory_name="",
         scale_factors=(),
-        factory_kwargs=MappingProxyType({
-            "num_training_circuits": num_training_circuits,
-            "fit_method": fit_method,
-        }),
+        factory_kwargs=MappingProxyType(
+            {
+                "num_training_circuits": num_training_circuits,
+                "fit_method": fit_method,
+            }
+        ),
         scaling_method="",
         rationale=("CDR selected.",),
         noise_category=noise_category,
@@ -277,6 +279,7 @@ class TestCDRSelection:
         )
         recipe = recommend(features)
         assert recipe.technique == "zne"
+        assert recipe.warnings == ()
 
     def test_non_clifford_too_shallow_selects_zne(self):
         """Non-Clifford but depth < CDR_MIN_DEPTH -> ZNE."""
@@ -289,6 +292,7 @@ class TestCDRSelection:
         )
         recipe = recommend(features)
         assert recipe.technique != "cdr"
+        assert recipe.warnings == ()
 
     def test_fraction_below_threshold_selects_zne(self):
         """Non-Clifford fraction below threshold -> ZNE."""
@@ -300,6 +304,7 @@ class TestCDRSelection:
         )
         recipe = recommend(features)
         assert recipe.technique != "cdr"
+        assert recipe.warnings == ()
 
     def test_pec_wins_over_cdr(self):
         """PEC conditions met AND CDR conditions met -> PEC wins."""
@@ -324,6 +329,7 @@ class TestCDRSelection:
         )
         recipe = recommend(features, technique="cdr")
         assert recipe.technique == "cdr"
+        assert recipe.warnings
 
     def test_cdr_override_on_all_clifford(self):
         """CDR override works even on all-Clifford circuit."""
@@ -334,6 +340,29 @@ class TestCDRSelection:
         )
         recipe = recommend(features, technique="cdr")
         assert recipe.technique == "cdr"
+        assert any("non-clifford" in warning.lower() for warning in recipe.warnings)
+
+    def test_forced_cdr_below_depth_range_warns(self):
+        features = make_features(
+            depth=CDR_MIN_DEPTH - 1,
+            total_gate_count=20,
+            non_clifford_count=10,
+            non_clifford_fraction=0.5,
+        )
+        recipe = recommend(features, technique="cdr")
+        assert recipe.technique == "cdr"
+        assert any("depth" in warning.lower() for warning in recipe.warnings)
+
+    def test_forced_cdr_above_depth_range_warns(self):
+        features = make_features(
+            depth=CDR_MAX_DEPTH + 1,
+            total_gate_count=60,
+            non_clifford_count=30,
+            non_clifford_fraction=0.5,
+        )
+        recipe = recommend(features, technique="cdr")
+        assert recipe.technique == "cdr"
+        assert any("depth" in warning.lower() for warning in recipe.warnings)
 
     def test_cdr_boundary_fraction(self):
         """Fraction exactly at threshold should NOT select CDR (> not >=)."""
@@ -449,6 +478,9 @@ class TestCDRTrainingCircuits:
 # ===================================================================
 
 
+# CDR generated code remains at compile/import coverage here because runtime
+# execution depends on Mitiq's training-circuit generation and simulator
+# conversion details, which are outside this narrow polish pass.
 class TestCDRCodegen:
     """Test CDR code generation template."""
 
@@ -582,9 +614,7 @@ class TestCDRCli:
             "h q[0];\ncx q[0],q[1];\n"
             "measure q[0] -> c[0];\nmeasure q[1] -> c[1];\n"
         )
-        result = runner.invoke(
-            main, ["generate", "--technique", "invalid", str(qasm)]
-        )
+        result = runner.invoke(main, ["generate", "--technique", "invalid", str(qasm)])
         assert result.exit_code != 0
 
 
@@ -595,6 +625,7 @@ class TestCDRCli:
 
 try:
     import cirq  # noqa: F401
+
     HAS_CIRQ = True
 except ImportError:
     HAS_CIRQ = False
