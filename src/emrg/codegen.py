@@ -3,7 +3,8 @@
 This module is the user-facing output stage of the EMRG pipeline. It takes
 a :class:`~emrg.heuristics.MitigationRecipe` and
 :class:`~emrg.analyzer.CircuitFeatures`, and renders a complete Python
-script that the user can copy-paste, adapt the executor, and run.
+script that wires Mitiq correctly once the user connects an executor to
+their simulator or hardware backend.
 
 Two verbosity levels are supported:
 
@@ -147,7 +148,7 @@ def _render_parameter_warning(features: CircuitFeatures) -> str | None:
 
 
 def _render_executor(explain: bool) -> str:
-    """Render the executor placeholder with a commented-out Aer example."""
+    """Render the backend executor adapter with a commented-out Aer example."""
     lines: list[str] = []
 
     if explain:
@@ -161,8 +162,9 @@ def _render_executor(explain: bool) -> str:
             "def execute(circuit):",
             '    """Execute a circuit and return an expectation value (float).',
             "",
-            "    This is a placeholder -- replace with your actual backend.",
-            "    The function must accept a quantum circuit and return a float.",
+            "    Backend adapter required by Mitiq. Replace this function body",
+            "    with a call to your simulator or hardware backend. The function",
+            "    must accept a quantum circuit and return a float.",
             '    """',
             "    # Example using Qiskit Aer (requires: pip install qiskit-aer):",
             "    # from qiskit_aer import AerSimulator",
@@ -173,7 +175,7 @@ def _render_executor(explain: bool) -> str:
             "    # counts = result.get_counts()",
             "    # # Compute expectation value from counts...",
             "    # return expectation_value",
-            '    raise NotImplementedError("Replace this with your executor.")',
+            '    raise NotImplementedError("Configure execute() for your backend.")',
         ]
     )
 
@@ -200,8 +202,7 @@ def _render_execution(
         and recipe.factory_name == "RichardsonFactory"
     ):
         lines.append(
-            "# fold_gates_at_random selected: circuit layers have "
-            "uneven noise density."
+            "# fold_gates_at_random selected: circuit layers have uneven noise density."
         )
 
     lines.extend(
@@ -248,9 +249,7 @@ def _render_pec_setup(
 
     lines: list[str] = []
     if explain:
-        lines.append(
-            "# PEC uses quasi-probability representations of noisy gates"
-        )
+        lines.append("# PEC uses quasi-probability representations of noisy gates")
         lines.append(
             "# to probabilistically cancel errors at the cost of extra samples."
         )
@@ -325,18 +324,10 @@ def _render_cdr_simulator(explain: bool) -> str:
     lines: list[str] = []
 
     if explain:
-        lines.append(
-            "# CDR needs a classical simulator to evaluate near-Clifford"
-        )
-        lines.append(
-            "# training circuits exactly. Cirq's DensityMatrixSimulator"
-        )
-        lines.append(
-            "# runs these circuits without noise (noiseless reference)."
-        )
-        lines.append(
-            "# Install cirq if needed: pip install emrg[preview]"
-        )
+        lines.append("# CDR needs a classical simulator to evaluate near-Clifford")
+        lines.append("# training circuits exactly. Cirq's DensityMatrixSimulator")
+        lines.append("# runs these circuits without noise (noiseless reference).")
+        lines.append("# Install cirq if needed: pip install emrg[preview]")
 
     lines.extend(
         [
@@ -377,18 +368,10 @@ def _render_cdr_setup(
 
     lines: list[str] = []
     if explain:
-        lines.append(
-            "# CDR creates near-Clifford training circuits by replacing"
-        )
-        lines.append(
-            "# non-Clifford gates with Clifford substitutes. These can be"
-        )
-        lines.append(
-            "# simulated classically and used to fit a regression model"
-        )
-        lines.append(
-            "# that corrects the noisy results on the original circuit."
-        )
+        lines.append("# CDR creates near-Clifford training circuits by replacing")
+        lines.append("# non-Clifford gates with Clifford substitutes. These can be")
+        lines.append("# simulated classically and used to fit a regression model")
+        lines.append("# that corrects the noisy results on the original circuit.")
         lines.append("")
 
     lines.append(f"num_training_circuits = {num_training}")
@@ -528,9 +511,7 @@ def _render_composite_pec_executor(explain: bool) -> str:
     """Render the inner PEC executor used by the outer ZNE call."""
     lines: list[str] = []
     if explain:
-        lines.append(
-            "# This executor is called by ZNE for every noise-scaled circuit."
-        )
+        lines.append("# This executor is called by ZNE for every noise-scaled circuit.")
         lines.append(
             "# It applies PEC to the scaled circuit using the base backend executor."
         )

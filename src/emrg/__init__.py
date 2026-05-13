@@ -1,8 +1,8 @@
 """EMRG -- Error Mitigation Recipe Generator.
 
 Automatic quantum error mitigation recipe generator for NISQ circuits.
-Analyzes quantum circuits and generates ready-to-run, explained
-Mitiq-powered error mitigation code.
+Analyzes quantum circuits and generates explained Mitiq-powered code
+that is ready to connect to a simulator or hardware executor.
 
 Quick start::
 
@@ -60,8 +60,8 @@ class GeneratedRecipe:
     intermediate analysis results into a single object.
 
     Attributes:
-        code: Ready-to-run Python script with Mitiq imports, factory
-            setup, executor placeholder, and ``execute_with_zne`` call.
+        code: Python script with Mitiq imports, mitigation setup,
+            backend executor adapter, and execution call.
         rationale: Tuple of explanation strings describing why the
             mitigation strategy was chosen, with literature references.
         features: Circuit analysis from :func:`analyze_circuit`.
@@ -156,9 +156,7 @@ def generate_recipe(
     >>> len(result.rationale) > 0
     True
     """
-    features = analyze_circuit(
-        qc, noise_model_available=noise_model_available
-    )
+    features = analyze_circuit(qc, noise_model_available=noise_model_available)
     recipe = recommend(features, technique=technique)
     code = generate_code(
         recipe,

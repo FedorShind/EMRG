@@ -5,7 +5,7 @@
 
 **Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
 
-EMRG analyzes a quantum circuit and generates ready-to-run [Mitiq](https://mitiq.readthedocs.io/) error mitigation code. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes, tunes the parameters, and explains each decision. No manual configuration required.
+EMRG analyzes a quantum circuit and generates [Mitiq](https://mitiq.readthedocs.io/) error mitigation code with the right imports, parameters, and rationale. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes so you only need to connect the generated executor adapter to your simulator or hardware backend.
 
 > **v0.4.0** -- ZNE + PEC + CDR + Composite + Preview. [Roadmap](#roadmap) below.
 
@@ -53,7 +53,7 @@ Or from source:
 ```
 git clone https://github.com/FedorShind/EMRG.git
 cd EMRG
-pip install -e ".[dev]"
+pip install -e ".[dev,preview,qasm3]"
 ```
 
 Or try it without installing: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
@@ -121,7 +121,7 @@ print(result.preview)     # Simulation comparison results
 ### Example Output
 ```
 # =============================================================
-# EMRG v0.3.0 -- Error Mitigation Recipe
+# EMRG v0.4.0 -- Error Mitigation Recipe
 # Circuit: 2 qubits, depth 3, 1 multi-qubit gates
 # Noise estimate: 0.011 (low)
 # =============================================================
@@ -138,8 +138,8 @@ factory = LinearFactory(scale_factors=[1.0, 1.5, 2.0])
 
 def execute(circuit):
     """Execute a circuit and return an expectation value (float)."""
-    # Replace with your actual backend
-    raise NotImplementedError("Replace this with your executor.")
+    # Connect this adapter to your simulator or hardware backend.
+    raise NotImplementedError("Configure execute() for your backend.")
 
 mitigated_value = execute_with_zne(
     circuit,
@@ -190,7 +190,7 @@ EMRG/
 │   ├── preview.py       # Simulation preview engine
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 385 tests, 96% coverage
+├── tests/               # 398 tests, 95% coverage
 ├── docs/
 │   ├── examples/        # Example circuits (Python + QASM)
 │   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
@@ -200,7 +200,7 @@ EMRG/
 
 ## Benchmarks
 
-Collected by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py) on EMRG v0.3.0.
+Reference benchmark snapshot collected by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py) on EMRG v0.3.0. Rerun the benchmark script before using these numbers for new release claims.
 
 > **Environment:** Python 3.12, Windows 11 | Qiskit 2.3.0, Mitiq 0.48.1
 
@@ -317,7 +317,7 @@ python benchmarks/run_benchmark.py
 - [x] Layerwise Richardson integration
 - [x] `--preview` mode (noisy simulation + before/after comparison)
 - [x] Expanded tutorials (VQE, QAOA)
-- [x] 385 tests, 96% coverage, zero lint warnings
+- [x] 398 tests, 95% coverage, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)

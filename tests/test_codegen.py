@@ -291,7 +291,7 @@ class TestExplainMode:
 
 
 # ---------------------------------------------------------------------------
-# Tests: executor placeholder
+# Tests: executor backend adapter
 # ---------------------------------------------------------------------------
 
 
@@ -306,11 +306,18 @@ class TestExecutor:
         self, shallow_features: CircuitFeatures
     ) -> None:
         code = generate_code(_make_linear_recipe(), shallow_features)
-        assert "NotImplementedError" in code
+        assert 'NotImplementedError("Configure execute() for your backend.")' in code
 
     def test_executor_has_aer_example(self, shallow_features: CircuitFeatures) -> None:
         code = generate_code(_make_linear_recipe(), shallow_features)
         assert "AerSimulator" in code
+
+    def test_executor_guidance_uses_backend_adapter_language(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        code = generate_code(_make_linear_recipe(), shallow_features)
+        assert "place" + "holder" not in code.lower()
+        assert "Backend adapter required by Mitiq" in code
 
 
 # ---------------------------------------------------------------------------
@@ -586,9 +593,7 @@ class TestPECExecution:
         assert "num_samples=num_samples," in code
 
     def test_custom_circuit_name(self, shallow_features: CircuitFeatures) -> None:
-        code = generate_code(
-            _make_pec_recipe(), shallow_features, circuit_name="qc"
-        )
+        code = generate_code(_make_pec_recipe(), shallow_features, circuit_name="qc")
         assert "    qc," in code
 
 
@@ -709,9 +714,7 @@ class TestCompositeCodegen:
     def test_composite_explain_mentions_combined_overhead(
         self, moderate_features: CircuitFeatures
     ) -> None:
-        code = generate_code(
-            _make_composite_recipe(), moderate_features, explain=True
-        )
+        code = generate_code(_make_composite_recipe(), moderate_features, explain=True)
         assert "Rationale:" in code
         assert "Combined estimated overhead" in code
 
@@ -758,9 +761,7 @@ class TestLayerwiseRichardsonCodegen:
         code = generate_code(_make_richardson_recipe(), moderate_features)
         assert "fold_gates_at_random selected" not in code
 
-    def test_poly_no_layerwise_comment(
-        self, deep_features: CircuitFeatures
-    ) -> None:
+    def test_poly_no_layerwise_comment(self, deep_features: CircuitFeatures) -> None:
         """PolyFactory also uses fold_gates_at_random but should NOT get
         the layerwise comment."""
         code = generate_code(_make_poly_recipe(), deep_features)
@@ -778,8 +779,6 @@ class TestLayerwiseRichardsonCodegen:
         code = generate_code(_make_layerwise_richardson_recipe(), moderate_features)
         assert "scale_noise=fold_gates_at_random," in code
 
-    def test_layerwise_compiles(
-        self, moderate_features: CircuitFeatures
-    ) -> None:
+    def test_layerwise_compiles(self, moderate_features: CircuitFeatures) -> None:
         code = generate_code(_make_layerwise_richardson_recipe(), moderate_features)
         compile(code, "<emrg-layerwise-test>", "exec")

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from qiskit.exceptions import MissingOptionalLibraryError
 
 from emrg import __version__
 from emrg.cli import main
@@ -220,15 +222,41 @@ class TestQASMAutoDetect:
     """Verify QASM version auto-detection."""
 
     def test_qasm3_detected(self, runner: CliRunner) -> None:
-        """QASM 3.0 header should be detected; since qiskit_qasm3_import
-        is not installed, we expect a clear error message."""
+        """QASM 3.0 header should be detected and routed through qasm3."""
         qasm3_str = (
             'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nbit[2] c;\nh q[0];\n'
         )
         result = runner.invoke(main, ["analyze", "-"], input=qasm3_str)
-        # Should fail gracefully (no traceback), with a clear message
+
+        if importlib.util.find_spec("qiskit_qasm3_import") is None:
+            assert result.exit_code != 0
+            assert "qiskit_qasm3_import" in result.output
+        else:
+            assert result.exit_code == 0
+            assert "Circuit Analysis:" in result.output
+            assert "Qubits:" in result.output
+
+    def test_qasm3_missing_importer_has_install_hint(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing QASM 3 support should produce the optional-extra hint."""
+        from qiskit import qasm3
+
+        def missing_importer(_source: str):
+            raise MissingOptionalLibraryError(
+                libname="qiskit_qasm3_import",
+                name="OpenQASM 3 import",
+                pip_install="pip install qiskit_qasm3_import",
+            )
+
+        monkeypatch.setattr(qasm3, "loads", missing_importer)
+        qasm3_str = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nh q[0];\n'
+
+        result = runner.invoke(main, ["analyze", "-"], input=qasm3_str)
+
         assert result.exit_code != 0
-        assert "QASM 3.0" in result.output or "qasm3" in result.output
+        assert "QASM 3.0 detected" in result.output
+        assert "pip install qiskit_qasm3_import" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -321,8 +349,10 @@ class TestGeneratePEC:
         result = runner.invoke(
             main,
             [
-                "generate", str(BELL_QASM),
-                "--technique", "pec",
+                "generate",
+                str(BELL_QASM),
+                "--technique",
+                "pec",
                 "--noise-model",
                 "--explain",
             ],
@@ -376,8 +406,10 @@ class TestGenerateComposite:
         result = runner.invoke(
             main,
             [
-                "generate", str(BELL_QASM),
-                "--technique", "composite",
+                "generate",
+                str(BELL_QASM),
+                "--technique",
+                "composite",
                 "--noise-model",
                 "--explain",
             ],

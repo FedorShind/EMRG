@@ -63,6 +63,7 @@ def _load_circuit(qasm_source: str) -> QuantumCircuit:
     if stripped.startswith("OPENQASM 3"):
         try:
             from qiskit import qasm3
+            from qiskit.exceptions import MissingOptionalLibraryError
         except ImportError as exc:
             raise click.ClickException(
                 "QASM 3.0 detected but the 'qiskit_qasm3_import' package "
@@ -71,6 +72,12 @@ def _load_circuit(qasm_source: str) -> QuantumCircuit:
             ) from exc
         try:
             return qasm3.loads(text)
+        except MissingOptionalLibraryError as exc:
+            raise click.ClickException(
+                "QASM 3.0 detected but the 'qiskit_qasm3_import' package "
+                "is not installed. Install it with: "
+                "pip install qiskit_qasm3_import"
+            ) from exc
         except Exception as exc:
             raise click.ClickException(f"Failed to parse QASM 3.0: {exc}") from exc
 
@@ -122,8 +129,8 @@ def _format_features_table(features: CircuitFeatures) -> str:
 def main(ctx: click.Context) -> None:
     """EMRG -- Error Mitigation Recipe Generator.
 
-    Analyze quantum circuits and generate ready-to-run Mitiq
-    error mitigation code.
+    Analyze quantum circuits and generate Mitiq error mitigation code
+    ready to connect to a simulator or hardware executor.
     """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -201,9 +208,7 @@ def generate(
     qc = _load_circuit(qasm_file)
 
     try:
-        features = analyze_circuit(
-            qc, noise_model_available=noise_model
-        )
+        features = analyze_circuit(qc, noise_model_available=noise_model)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -229,17 +234,17 @@ def generate(
 
         try:
             result = run_preview(
-                qc, recipe, noise_level=noise_level, observable=observable,
+                qc,
+                recipe,
+                noise_level=noise_level,
+                observable=observable,
             )
         except ImportError:
             raise click.ClickException(
-                "Preview requires cirq. "
-                "Install with: pip install emrg[preview]"
+                "Preview requires cirq. Install with: pip install emrg[preview]"
             ) from None
         except Exception as exc:
-            raise click.ClickException(
-                f"Preview simulation failed: {exc}"
-            ) from exc
+            raise click.ClickException(f"Preview simulation failed: {exc}") from exc
         click.echo("")
         click.echo(format_preview(result, features))
 
