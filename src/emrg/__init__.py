@@ -22,12 +22,20 @@ Quick start::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from emrg._version import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
+from emrg.policy import (
+    DEFAULT_POLICY,
+    RecipePolicy,
+    load_policy,
+    policy_to_dict,
+    save_policy,
+)
 from emrg.preview import PreviewResult, format_preview, run_preview
 
 if TYPE_CHECKING:
@@ -41,6 +49,11 @@ __all__ = [
     "CircuitFeatures",
     "recommend",
     "MitigationRecipe",
+    "RecipePolicy",
+    "DEFAULT_POLICY",
+    "load_policy",
+    "policy_to_dict",
+    "save_policy",
     "generate_code",
     "run_preview",
     "PreviewResult",
@@ -95,6 +108,7 @@ def generate_recipe(
     preview: bool = False,
     noise_level: float = 0.01,
     observable: str = "Z0",
+    policy: RecipePolicy | str | Path | None = None,
 ) -> GeneratedRecipe:
     """Analyze a circuit and generate a complete error mitigation recipe.
 
@@ -129,6 +143,9 @@ def generate_recipe(
         Observable to measure in preview: ``"Z0"``, ``"Z1"``, ..., or
         ``"ZZ"`` (default ``"Z0"``).  Only used when *preview* is
         ``True``.
+    policy:
+        Optional :class:`RecipePolicy` or path to a JSON/YAML policy file.
+        When ``None``, EMRG uses the built-in default policy.
 
     Returns
     -------
@@ -156,8 +173,9 @@ def generate_recipe(
     >>> len(result.rationale) > 0
     True
     """
+    active_policy = load_policy(policy) if isinstance(policy, (str, Path)) else policy
     features = analyze_circuit(qc, noise_model_available=noise_model_available)
-    recipe = recommend(features, technique=technique)
+    recipe = recommend(features, technique=technique, policy=active_policy)
     code = generate_code(
         recipe,
         features,

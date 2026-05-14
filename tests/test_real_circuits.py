@@ -13,10 +13,12 @@ from click.testing import CliRunner
 from qiskit import QuantumCircuit, qasm2
 from qiskit.circuit import ParameterVector
 
+from emrg import DEFAULT_POLICY, RecipePolicy
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.cli import main
 from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
+from emrg.policy import policy_to_dict
 from emrg.preview import run_preview
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "examples"
@@ -224,6 +226,21 @@ def test_cli_analyze_and_generate_qasm_example() -> None:
     assert "Error Mitigation Recipe" in generate_result.output
     assert "execute_with_" in generate_result.output
     compile(generate_result.output, "<emrg-cli-generated-example>", "exec")
+
+
+def test_real_circuit_pipeline_with_custom_policy() -> None:
+    policy_data = policy_to_dict(DEFAULT_POLICY)
+    policy_data["techniques"]["zne"]["shallow"]["scale_factors"] = [1.0, 2.0]
+    policy = RecipePolicy.from_dict(policy_data)
+    qc = _ghz()
+
+    features = analyze_circuit(qc)
+    recipe = recommend(features, policy=policy)
+    code = generate_code(recipe, features)
+
+    assert recipe.scale_factors == (1.0, 2.0)
+    assert "scale_factors=[1.0, 2.0]" in code
+    compile(code, "<emrg-real-custom-policy>", "exec")
 
 
 def test_preview_runs_on_small_real_circuit_subset() -> None:

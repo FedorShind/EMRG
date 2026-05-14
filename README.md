@@ -7,7 +7,7 @@
 
 EMRG analyzes a quantum circuit and generates [Mitiq](https://mitiq.readthedocs.io/) error mitigation code with the right imports, parameters, and rationale. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes so you only need to connect the generated executor adapter to your simulator or hardware backend.
 
-> **v0.4.0** -- ZNE + PEC + CDR + Composite + Preview. [Roadmap](#roadmap) below.
+> **v0.5.0** -- Policy-configurable heuristics + ZNE, PEC, CDR, Composite, and Preview. [Roadmap](#roadmap) below.
 
 ---
 
@@ -26,7 +26,7 @@ Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] -->
 3. **Select Technique** -- Use priority rules: composite for eligible moderate-depth circuits, PEC for shallow low-overhead noise-model cases, CDR for non-Clifford-heavy circuits, otherwise ZNE.
 4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
 
-### Heuristic Rules (v0.4.0)
+### Heuristic Rules (v0.5.0 default policy)
 
 | Circuit Profile | Technique | Configuration | Rationale |
 |---|---|---|---|
@@ -49,11 +49,16 @@ For preview mode (noisy simulation comparison):
 pip install emrg[preview]
 ```
 
+For YAML policy files:
+```
+pip install emrg[config]
+```
+
 Or from source:
 ```
 git clone https://github.com/FedorShind/EMRG.git
 cd EMRG
-pip install -e ".[dev,preview,qasm3]"
+pip install -e ".[dev,preview,config,qasm3]"
 ```
 
 Or try it without installing: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
@@ -68,6 +73,13 @@ emrg generate circuit.qasm --explain
 
 # Save to file
 emrg generate circuit.qasm -o mitigated.py
+
+# Create and validate a policy file
+emrg policy init emrg-policy.json
+emrg policy validate emrg-policy.json
+
+# Generate with a policy file
+emrg generate circuit.qasm --policy emrg-policy.json
 
 # Force a specific technique
 emrg generate circuit.qasm --technique pec --noise-model
@@ -94,7 +106,7 @@ emrg analyze circuit.qasm --json
 ### Python API
 ```python
 from qiskit import QuantumCircuit
-from emrg import generate_recipe
+from emrg import generate_recipe, load_policy
 
 # Create a circuit
 qc = QuantumCircuit(2, 2)
@@ -111,6 +123,10 @@ print(result.features)    # Circuit analysis details
 # With PEC (requires noise model availability)
 result = generate_recipe(qc, noise_model_available=True)
 
+# With a policy file
+policy = load_policy("emrg-policy.json")
+result = generate_recipe(qc, policy=policy)
+
 # Force CDR (requires cirq: pip install emrg[preview])
 result = generate_recipe(qc, technique="cdr")
 
@@ -122,10 +138,46 @@ result = generate_recipe(qc, preview=True, noise_level=0.01)
 print(result.preview)     # Simulation comparison results
 ```
 
+## Policy Files
+
+Policies tune EMRG's existing rule-based heuristics. They can enable or disable techniques, adjust thresholds and overhead budgets, and choose supported Mitiq factory/scaling settings. They do not execute Python, import code, or define arbitrary logic.
+
+JSON policies work with the base install. YAML policies use `yaml.safe_load()` and require `pip install emrg[config]`.
+
+```
+emrg policy init emrg-policy.json
+emrg generate circuit.qasm --policy emrg-policy.json
+```
+
+Python:
+```python
+from emrg import generate_recipe, load_policy
+
+policy = load_policy("emrg-policy.json")
+result = generate_recipe(qc, policy=policy)
+```
+
+Policy excerpt:
+```yaml
+version: 1
+name: shallow-two-point-zne
+
+techniques:
+  zne:
+    shallow:
+      factory: LinearFactory
+      scale_factors: [1.0, 2.0]
+      scaling_method: fold_global
+```
+
+Policy files are complete, strict documents. Use `emrg policy init` to create the full schema, then edit the fields you want to tune.
+
+Without `--policy` or `policy=...`, EMRG uses the built-in default policy and preserves the existing recommendation behavior.
+
 ### Example Output
 ```
 # =============================================================
-# EMRG v0.4.0 -- Error Mitigation Recipe
+# EMRG v0.5.0 -- Error Mitigation Recipe
 # Circuit: 2 qubits, depth 3, 1 multi-qubit gates
 # Noise estimate: 0.011 (low)
 # =============================================================
@@ -190,11 +242,12 @@ EMRG/
 │   ├── _version.py      # Single source of truth for version
 │   ├── analyzer.py      # Circuit feature extraction
 │   ├── heuristics.py    # Rule-based decision engine
+│   ├── policy.py        # JSON/YAML policy model and validation
 │   ├── codegen.py       # Template-based code generation
 │   ├── preview.py       # Simulation preview engine
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 407 tests, 95% coverage
+├── tests/               # 477 tests, 96% coverage
 ├── docs/
 │   ├── examples/        # Example circuits (Python + QASM)
 │   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
@@ -321,7 +374,7 @@ python benchmarks/run_benchmark.py
 - [x] Layerwise Richardson integration
 - [x] `--preview` mode (noisy simulation + before/after comparison)
 - [x] Expanded tutorials (VQE, QAOA)
-- [x] 407 tests, 95% coverage, zero lint warnings
+- [x] 477 tests, 96% coverage, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)
@@ -330,7 +383,7 @@ python benchmarks/run_benchmark.py
 
 - [ ] Cirq, PennyLane, and Amazon Braket input support
 - [ ] Noise model import from Qiskit Aer / real device calibration data
-- [ ] Configurable heuristics via YAML/JSON
+- [x] Configurable heuristics via YAML/JSON
 - [ ] Jupyter widget for interactive recipe exploration
 - [ ] Web/Colab interface
 

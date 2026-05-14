@@ -22,6 +22,7 @@ from emrg._version import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
+from emrg.policy import DEFAULT_POLICY, load_policy, save_policy
 
 if TYPE_CHECKING:
     from qiskit import QuantumCircuit
@@ -124,6 +125,16 @@ def _echo_recipe_warnings(recipe: MitigationRecipe) -> None:
         click.echo(f"Warning: {warning}", err=True)
 
 
+def _load_policy_for_cli(policy_path: str | None):
+    """Load a policy path and translate validation errors for Click."""
+    if policy_path is None:
+        return None
+    try:
+        return load_policy(policy_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
@@ -196,6 +207,13 @@ def main(ctx: click.Context) -> None:
     show_default=True,
     help='Observable to measure: "Z0", "Z1", ..., or "ZZ" (used with --preview).',
 )
+@click.option(
+    "--policy",
+    "policy_path",
+    default=None,
+    type=click.Path(dir_okay=False, path_type=str),
+    help="JSON/YAML heuristic policy file.",
+)
 def generate(
     qasm_file: str,
     explain: bool,
@@ -206,6 +224,7 @@ def generate(
     preview: bool,
     noise_level: float,
     observable: str,
+    policy_path: str | None,
 ) -> None:
     """Generate error mitigation code from a QASM circuit.
 
@@ -218,7 +237,11 @@ def generate(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    recipe = recommend(features, technique=technique)
+    policy = _load_policy_for_cli(policy_path)
+    try:
+        recipe = recommend(features, technique=technique, policy=policy)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     code = generate_code(
         recipe,
         features,
@@ -254,6 +277,38 @@ def generate(
             raise click.ClickException(f"Preview simulation failed: {exc}") from exc
         click.echo("")
         click.echo(format_preview(result, features))
+
+
+# ---------------------------------------------------------------------------
+# policy commands
+# ---------------------------------------------------------------------------
+
+
+@main.group("policy")
+def policy_group() -> None:
+    """Create and validate EMRG heuristic policy files."""
+
+
+@policy_group.command("init")
+@click.argument("policy_file")
+def policy_init(policy_file: str) -> None:
+    """Write the default policy to POLICY_FILE."""
+    path = Path(policy_file)
+    if path.exists():
+        raise click.ClickException(f"Policy file already exists: {policy_file}")
+    try:
+        save_policy(DEFAULT_POLICY, path)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Wrote default policy to {policy_file}")
+
+
+@policy_group.command("validate")
+@click.argument("policy_file")
+def policy_validate(policy_file: str) -> None:
+    """Validate POLICY_FILE."""
+    _load_policy_for_cli(policy_file)
+    click.echo(f"Policy is valid: {policy_file}")
 
 
 # ---------------------------------------------------------------------------
