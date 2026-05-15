@@ -32,7 +32,7 @@ from emrg.codegen import generate_code
 from emrg.heuristics import MitigationRecipe, recommend
 from emrg.policy import DEFAULT_POLICY, RecipePolicy, load_policy, policy_to_dict
 
-DEFAULT_POLICY_PATH = Path("benchmarks/policies/default-v050.json")
+DEFAULT_POLICY_PATH = Path("benchmarks/policies/default-v051.json")
 
 warnings.filterwarnings("ignore", category=UserWarning, module=r"mitiq\..*")
 
@@ -49,6 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-qubits", type=int, default=10)
     parser.add_argument("--json-indent", type=int, default=2)
     parser.add_argument("--external-qasm-dir", type=Path, default=None)
+    parser.add_argument("--split", choices=("train", "holdout", "all"), default="all")
     args = parser.parse_args(argv)
 
     if args.repeats <= 0:
@@ -208,6 +209,8 @@ def _features_to_case_base(
         "noise_model": case.noise_model,
         "noise_level": case.noise_level,
         "observable": case.observable,
+        "stress_target": case.stress_target,
+        "split": case.split,
         "selected_recipe": recipe.to_dict(),
     }
 
@@ -441,6 +444,7 @@ def _run_external_case(
         stress_target="external_speed",
         run_quality_by_default=False,
         speed_only=True,
+        split="external",
     )
     result = _features_to_case_base(case, features, recipe)
     result["speed"] = (
@@ -543,7 +547,7 @@ def build_output(args: argparse.Namespace) -> dict[str, Any]:
             seed=args.seed,
             repeats=args.repeats,
         )
-        for case in build_corpus(seed=args.seed, quick=args.quick)
+        for case in build_corpus(seed=args.seed, quick=args.quick, split=args.split)
     ]
     if args.external_qasm_dir is not None:
         cases.extend(
@@ -576,6 +580,7 @@ def build_output(args: argparse.Namespace) -> dict[str, Any]:
             "include_speed": args.include_speed,
             "include_quality": args.include_quality,
             "max_qubits": args.max_qubits,
+            "split": args.split,
         },
         "cases": cases,
         "summary": summarize(cases),

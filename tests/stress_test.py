@@ -75,7 +75,7 @@ class TestInputEdgeCases:
         assert features.depth > 100
         result = generate_recipe(qc)
         assert result.recipe.factory_name == "PolyFactory"
-        assert result.recipe.scaling_method == "fold_gates_at_random"
+        assert result.recipe.scaling_method == "fold_global"
         compile(result.code, "<stress-deep>", "exec")
 
     def test_very_wide_circuit(self) -> None:
@@ -304,11 +304,11 @@ class TestCodeValidation:
         assert result.recipe.factory_name == "LinearFactory"
         compile(result.code, "<validate-linear>", "exec")
 
-    def test_zne_richardson_compiles(self) -> None:
-        """Medium-depth circuit -> RichardsonFactory."""
+    def test_zne_moderate_linear_compiles(self) -> None:
+        """Medium-depth circuit -> calibrated LinearFactory."""
         qc = self._build_circuit(30)
         result = generate_recipe(qc)
-        assert result.recipe.factory_name in ("RichardsonFactory", "PolyFactory")
+        assert result.recipe.factory_name in ("LinearFactory", "PolyFactory")
         compile(result.code, "<validate-richardson>", "exec")
 
     def test_zne_poly_compiles(self) -> None:
@@ -350,23 +350,23 @@ class TestCodeValidation:
 class TestHeuristicBoundaries:
     """Verify exact threshold behavior."""
 
-    def test_depth_19_gets_linear(self) -> None:
-        f = _make_features(depth=19, multi_qubit_gate_count=5)
+    def test_depth_17_gets_linear(self) -> None:
+        f = _make_features(depth=17, multi_qubit_gate_count=5)
         recipe = recommend(f)
         assert recipe.factory_name == "LinearFactory"
 
-    def test_depth_20_gets_richardson(self) -> None:
-        f = _make_features(depth=20)
+    def test_depth_18_gets_moderate_linear(self) -> None:
+        f = _make_features(depth=18)
         recipe = recommend(f)
-        assert recipe.factory_name == "RichardsonFactory"
+        assert recipe.factory_name == "LinearFactory"
 
-    def test_depth_50_gets_richardson(self) -> None:
-        f = _make_features(depth=50)
+    def test_depth_55_gets_moderate_linear(self) -> None:
+        f = _make_features(depth=55)
         recipe = recommend(f)
-        assert recipe.factory_name == "RichardsonFactory"
+        assert recipe.factory_name == "LinearFactory"
 
-    def test_depth_51_gets_poly(self) -> None:
-        f = _make_features(depth=51, noise_category="moderate")
+    def test_depth_56_gets_poly(self) -> None:
+        f = _make_features(depth=56, noise_category="moderate")
         recipe = recommend(f)
         assert recipe.factory_name == "PolyFactory"
 
@@ -391,7 +391,7 @@ class TestHeuristicBoundaries:
     def test_layerwise_boundary_1_9(self) -> None:
         f = _make_features(depth=30, layer_heterogeneity=1.9)
         recipe = recommend(f)
-        assert recipe.scaling_method == "fold_global"
+        assert recipe.scaling_method == "fold_gates_at_random"
 
     def test_layerwise_boundary_2_1(self) -> None:
         f = _make_features(depth=30, layer_heterogeneity=2.1)

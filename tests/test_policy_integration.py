@@ -166,6 +166,33 @@ def test_custom_zne_scale_factors_reach_recipe_and_codegen() -> None:
     assert "scale_factors=[1.0, 2.0]" in code
 
 
+def test_policy_rationale_reflects_configured_zne_profile() -> None:
+    policy = _policy_with(
+        lambda data: data["techniques"]["zne"]["moderate"].update(
+            {
+                "factory": "LinearFactory",
+                "scale_factors": [1.0, 1.5, 2.0, 2.5],
+                "scaling_method": "fold_gates_at_random",
+            }
+        )
+    )
+    features = make_features(
+        depth=30,
+        total_gate_count=20,
+        non_clifford_fraction=0.0,
+        noise_category="moderate",
+    )
+
+    recipe = recommend(features, policy=policy)
+    rationale = " ".join(recipe.rationale)
+
+    assert recipe.factory_name == "LinearFactory"
+    assert recipe.scaling_method == "fold_gates_at_random"
+    assert "LinearFactory" in rationale
+    assert "fold_gates_at_random" in rationale
+    assert "RichardsonFactory uses" not in rationale
+
+
 def test_disabled_pec_prevents_auto_pec_selection() -> None:
     policy = _policy_with(
         lambda data: data["techniques"]["pec"].update({"enabled": False})

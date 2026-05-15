@@ -7,7 +7,7 @@
 
 EMRG analyzes a quantum circuit and generates [Mitiq](https://mitiq.readthedocs.io/) error mitigation code with the right imports, parameters, and rationale. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes so you only need to connect the generated executor adapter to your simulator or hardware backend.
 
-> **v0.5.0** -- Policy-configurable heuristics + ZNE, PEC, CDR, Composite, and Preview. [Roadmap](#roadmap) below.
+> **v0.5.1** -- Benchmark-calibrated default policy + reproducible benchmark/search harness. [Roadmap](#roadmap) below.
 
 ---
 
@@ -26,16 +26,16 @@ Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] -->
 3. **Select Technique** -- Use priority rules: composite for eligible moderate-depth circuits, PEC for shallow low-overhead noise-model cases, CDR for non-Clifford-heavy circuits, otherwise ZNE.
 4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
 
-### Heuristic Rules (v0.5.0 default policy)
+### Heuristic Rules (v0.5.1 default policy)
 
 | Circuit Profile | Technique | Configuration | Rationale |
 |---|---|---|---|
 | Depth 15--30 + moderate noise + noise model + combined overhead <= 1000 | **Composite (ZNE over PEC)** | ZNE factory over PEC executor | PEC corrects each noise-scaled circuit before ZNE extrapolates residual bias |
-| Depth ≤ 30 + noise model + overhead < 1000 | **PEC** | Depolarizing representations | Unbiased error cancellation when overhead is manageable |
-| Non-Clifford fraction > 20% + depth 10--40 | **CDR** | 8--16 training circuits, linear fit | Clifford substitution + regression outperforms ZNE on non-Clifford-heavy circuits |
-| Depth < 20, low multi-qubit gates | ZNE `LinearFactory` | `[1.0, 1.5, 2.0]` | Conservative for shallow circuits |
-| Depth 20--50 | ZNE `RichardsonFactory` | `[1.0, 1.5, 2.0, 2.5]` | Better extrapolation for moderate noise |
-| Depth > 50 or high noise | ZNE `PolyFactory` (deg 2--3) | `[1.0, 1.5, 2.0, 2.5, 3.0]` | Handles non-linear noise scaling |
+| Depth <= 30 + noise model + overhead < 1000 | **PEC** | Depolarizing representations | Unbiased error cancellation when overhead is manageable |
+| Non-Clifford fraction > 30% + depth 12--40 | **CDR** | 6--14 training circuits, linear fit | Clifford substitution + regression when non-Clifford content is high enough to justify CDR |
+| Depth < 18, low multi-qubit gates | ZNE `LinearFactory` | `[1.0, 1.5, 2.0, 2.5, 3.0]` + `fold_global` | More extrapolation points for shallow circuits, at bounded overhead |
+| Depth 18--55 | ZNE `LinearFactory` | `[1.0, 1.5, 2.0, 2.5]` + `fold_gates_at_random` | Calibration favored lower-order extrapolation with gate-level folding on the internal corpus |
+| Depth > 55 or high noise | ZNE `PolyFactory(order=2)` | `[1.0, 1.25, 1.5, 2.0]` + `fold_global` | Captures non-linear noise while avoiding unnecessary scale factors |
 
 ## Quick Start
 
@@ -172,12 +172,14 @@ techniques:
 
 Policy files are complete, strict documents. Use `emrg policy init` to create the full schema, then edit the fields you want to tune.
 
-Without `--policy` or `policy=...`, EMRG uses the built-in default policy and preserves the existing recommendation behavior.
+Without `--policy` or `policy=...`, EMRG uses the built-in default policy.
+Use `benchmarks/policies/default-v050.json` to reproduce the v0.5.0
+calibration baseline.
 
 ### Example Output
 ```
 # =============================================================
-# EMRG v0.5.0 -- Error Mitigation Recipe
+# EMRG v0.5.1 -- Error Mitigation Recipe
 # Circuit: 2 qubits, depth 3, 1 multi-qubit gates
 # Noise estimate: 0.011 (low)
 # =============================================================
@@ -247,7 +249,7 @@ EMRG/
 │   ├── preview.py       # Simulation preview engine
 │   ├── cli.py           # Click CLI interface
 │   └── py.typed         # PEP 561 type marker
-├── tests/               # 477 tests, 96% coverage
+├── tests/               # 486 tests, coverage checked in CI/local validation
 ├── docs/
 │   ├── examples/        # Example circuits (Python + QASM)
 │   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
@@ -269,6 +271,19 @@ instead of tuned by anecdote.
 .\.venv\Scripts\python.exe benchmarks\run_benchmark.py --policy benchmarks\policies\default-v050.json --output benchmarks\results\baseline-v050.json
 .\.venv\Scripts\python.exe benchmarks\score_results.py benchmarks\results\baseline-v050.json
 ```
+
+Local v0.5.1 calibration snapshot, using the fixed internal corpus with
+`--seed 1234 --repeats 5 --include-speed --include-quality` on Python 3.12.10,
+Windows 11, Qiskit 2.3.0, Mitiq 0.48.1, NumPy 1.26.4:
+
+| Policy | Score | Quality passed/failed/skipped | Median error reduction | Median overhead |
+|---|---:|---|---:|---:|
+| `default-v050.json` | 0.7872 | 10 / 0 / 8 | 2.357x | 6.500 |
+| `default-v051.json` | 1.8455 | 10 / 0 / 8 | 4.779x | 5.000 |
+
+These are benchmark-harness results, not hardware-performance claims. Rerun the
+commands on your target environment before using the numbers for release notes
+or comparisons.
 
 See [`benchmarks/README.md`](benchmarks/README.md) for the benchmark philosophy,
 external QASM guidance, and candidate-policy comparison workflow.
@@ -393,7 +408,7 @@ python benchmarks/run_benchmark.py
 - [x] Layerwise Richardson integration
 - [x] `--preview` mode (noisy simulation + before/after comparison)
 - [x] Expanded tutorials (VQE, QAOA)
-- [x] 477 tests, 96% coverage, zero lint warnings
+- [x] 486 tests, coverage checked in CI/local validation, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [ ] Real hardware benchmarks (IBM Quantum devices)

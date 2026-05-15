@@ -86,9 +86,9 @@ class TestGenerate:
     def test_generate_vqe(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["generate", str(VQE_QASM)])
         assert result.exit_code == 0
-        # VQE with Ry(pi/4) rotations has high non-Clifford fraction
-        # -> CDR is selected over ZNE.
-        assert "execute_with_cdr" in result.output
+        # The v0.5.1 calibrated default raises the CDR threshold, so this
+        # small VQE circuit now stays on ZNE.
+        assert "execute_with_zne" in result.output
 
     def test_generate_explain(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["generate", str(BELL_QASM), "--explain"])

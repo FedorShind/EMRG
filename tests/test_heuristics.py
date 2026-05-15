@@ -106,19 +106,19 @@ class TestPredicates:
         assert _is_moderate_depth(f) is True
 
     def test_is_moderate_depth_boundary_low(self) -> None:
-        f = _make_features(depth=20)
+        f = _make_features(depth=18)
         assert _is_moderate_depth(f) is True
 
     def test_is_moderate_depth_boundary_high(self) -> None:
-        f = _make_features(depth=50)
+        f = _make_features(depth=55)
         assert _is_moderate_depth(f) is True
 
     def test_is_moderate_depth_rejects_shallow(self) -> None:
-        f = _make_features(depth=19)
+        f = _make_features(depth=17)
         assert _is_moderate_depth(f) is False
 
     def test_is_moderate_depth_rejects_deep(self) -> None:
-        f = _make_features(depth=51)
+        f = _make_features(depth=56)
         assert _is_moderate_depth(f) is False
 
     def test_is_shallow_matches(self) -> None:
@@ -133,12 +133,12 @@ class TestPredicates:
         f = _make_features(depth=10, multi_qubit_gate_count=50)
         assert _is_shallow(f) is False
 
-    def test_is_shallow_boundary_depth_19(self) -> None:
-        f = _make_features(depth=19, multi_qubit_gate_count=49)
+    def test_is_shallow_boundary_depth_17(self) -> None:
+        f = _make_features(depth=17, multi_qubit_gate_count=49)
         assert _is_shallow(f) is True
 
-    def test_is_shallow_boundary_depth_20(self) -> None:
-        f = _make_features(depth=20, multi_qubit_gate_count=10)
+    def test_is_shallow_boundary_depth_18(self) -> None:
+        f = _make_features(depth=18, multi_qubit_gate_count=10)
         assert _is_shallow(f) is False
 
 
@@ -155,16 +155,18 @@ class TestRecommend:
         assert recipe.factory_name == "LinearFactory"
         assert recipe.scaling_method == "fold_global"
 
-    def test_moderate_gets_richardson(self, moderate_features: CircuitFeatures) -> None:
+    def test_moderate_gets_linear_random_fold(
+        self, moderate_features: CircuitFeatures
+    ) -> None:
         recipe = recommend(moderate_features)
-        assert recipe.factory_name == "RichardsonFactory"
-        assert recipe.scaling_method == "fold_global"
+        assert recipe.factory_name == "LinearFactory"
+        assert recipe.scaling_method == "fold_gates_at_random"
 
     def test_deep_gets_poly(self, deep_features: CircuitFeatures) -> None:
         recipe = recommend(deep_features)
         assert recipe.factory_name == "PolyFactory"
         assert recipe.factory_kwargs == {"order": 2}
-        assert recipe.scaling_method == "fold_gates_at_random"
+        assert recipe.scaling_method == "fold_global"
 
     def test_high_noise_shallow_gets_poly(
         self, high_noise_shallow_features: CircuitFeatures
@@ -198,17 +200,17 @@ class TestRulePriority:
         recipe = recommend(f)
         assert recipe.factory_name == "PolyFactory"
 
-    def test_depth_51_gets_poly_not_richardson(self) -> None:
-        """depth=51 triggers deep rule (>50) before moderate (20-50)."""
-        f = _make_features(depth=51, noise_category="moderate")
+    def test_depth_56_gets_poly_not_moderate(self) -> None:
+        """depth=56 triggers deep rule (>55) before moderate (18-55)."""
+        f = _make_features(depth=56, noise_category="moderate")
         recipe = recommend(f)
         assert recipe.factory_name == "PolyFactory"
 
-    def test_depth_50_gets_richardson_not_poly(self) -> None:
-        """depth=50 stays in moderate range (<=50)."""
-        f = _make_features(depth=50, noise_category="moderate")
+    def test_depth_55_gets_moderate_linear_not_poly(self) -> None:
+        """depth=55 stays in moderate range (<=55)."""
+        f = _make_features(depth=55, noise_category="moderate")
         recipe = recommend(f)
-        assert recipe.factory_name == "RichardsonFactory"
+        assert recipe.factory_name == "LinearFactory"
 
 
 # ---------------------------------------------------------------------------
@@ -220,10 +222,10 @@ class TestFallback:
     """Verify the fallback recipe fires when no rule matches."""
 
     def test_fallback_on_gap(self) -> None:
-        """depth=19, 2q_gates=50 -> shallow says no (>=50 gates), moderate
-        says no (depth<20) -> fallback should fire."""
+        """depth=17, 2q_gates=50 -> shallow says no (>=50 gates), moderate
+        says no (depth<18) -> fallback should fire."""
         f = _make_features(
-            depth=19,
+            depth=17,
             multi_qubit_gate_count=50,
             noise_category="low",
         )
@@ -316,7 +318,7 @@ class TestRecipeContent:
     ) -> None:
         recipe = recommend(moderate_features)
         all_text = " ".join(recipe.rationale)
-        assert "Temme" in all_text or "PRL" in all_text
+        assert "Li & Benjamin" in all_text or "PRX" in all_text
 
     def test_poly_recipe_has_order(self, deep_features: CircuitFeatures) -> None:
         recipe = recommend(deep_features)
@@ -845,16 +847,17 @@ class TestLayerwiseRichardson:
         assert recipe.factory_name == "RichardsonFactory"
         assert recipe.scaling_method == "fold_gates_at_random"
 
-    def test_low_heterogeneity_gets_fold_global(self) -> None:
+    def test_low_heterogeneity_gets_moderate_linear_random_fold(self) -> None:
         f = _make_features(depth=30, layer_heterogeneity=1.0)
         recipe = recommend(f)
-        assert recipe.factory_name == "RichardsonFactory"
-        assert recipe.scaling_method == "fold_global"
+        assert recipe.factory_name == "LinearFactory"
+        assert recipe.scaling_method == "fold_gates_at_random"
 
     def test_boundary_exactly_2_not_layerwise(self) -> None:
         f = _make_features(depth=30, layer_heterogeneity=2.0)
         recipe = recommend(f)
-        assert recipe.scaling_method == "fold_global"
+        assert recipe.factory_name == "LinearFactory"
+        assert recipe.scaling_method == "fold_gates_at_random"
 
     def test_boundary_2_01_is_layerwise(self) -> None:
         f = _make_features(depth=30, layer_heterogeneity=2.01)
@@ -872,10 +875,10 @@ class TestLayerwiseRichardson:
         assert recipe.factory_name == "LinearFactory"
         assert recipe.scaling_method == "fold_global"
 
-    def test_depth_51_gets_poly(self) -> None:
+    def test_depth_56_gets_poly(self) -> None:
         """Above LAYERWISE_MAX_DEPTH -> deep rule takes priority."""
         f = _make_features(
-            depth=51,
+            depth=56,
             layer_heterogeneity=5.0,
             noise_category="moderate",
         )

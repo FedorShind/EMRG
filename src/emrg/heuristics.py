@@ -75,10 +75,10 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 #: Circuits with depth above this are considered "deep".
-DEPTH_DEEP_THRESHOLD: int = 50
+DEPTH_DEEP_THRESHOLD: int = 55
 
 #: Circuits with depth at or above this are "moderate" (up to DEPTH_DEEP_THRESHOLD).
-DEPTH_MODERATE_THRESHOLD: int = 20
+DEPTH_MODERATE_THRESHOLD: int = 18
 
 #: Shallow circuits must have fewer multi-qubit gates than this.
 MULTI_QUBIT_GATE_SHALLOW_MAX: int = 50
@@ -121,13 +121,13 @@ LAYERWISE_HETEROGENEITY_THRESHOLD: float = 2.0
 # --- CDR (Clifford Data Regression) constants --------------------------------
 
 #: Number of CDR training circuits for small circuits (< 20 gates).
-CDR_TRAINING_CIRCUITS_SMALL: int = 8
+CDR_TRAINING_CIRCUITS_SMALL: int = 6
 
 #: Number of CDR training circuits for medium circuits (20-50 gates).
-CDR_TRAINING_CIRCUITS_MEDIUM: int = 12
+CDR_TRAINING_CIRCUITS_MEDIUM: int = 10
 
 #: Number of CDR training circuits for large circuits (> 50 gates).
-CDR_TRAINING_CIRCUITS_LARGE: int = 16
+CDR_TRAINING_CIRCUITS_LARGE: int = 14
 
 #: Gate count threshold between small and medium CDR training.
 CDR_GATE_THRESHOLD_MEDIUM: int = 20
@@ -745,12 +745,9 @@ def _profile_rationale(
         return (
             f"Circuit depth ({features.depth}) > {threshold} or noise category "
             f"'{features.noise_category}' indicates strong non-linear noise.",
-            "PolyFactory with order=2 captures quadratic noise scaling "
-            "better than linear/Richardson for deep circuits.",
-            "fold_gates_at_random reduces coherent error accumulation "
-            "compared to uniform folding (arXiv:2005.10921).",
-            "Five scale factors provide sufficient data points for a "
-            "degree-2 polynomial fit (arXiv:2307.05203).",
+            _factory_rationale(profile),
+            _scaling_rationale(profile),
+            _scale_factor_rationale(profile),
         )
     if profile_name == "heterogeneous":
         return (
@@ -758,36 +755,69 @@ def _profile_rationale(
             f"({profile.min_depth}-{profile.max_depth}) with high layer "
             f"heterogeneity ({features.layer_heterogeneity:.2f} "
             f"> {profile.min_layer_heterogeneity}).",
-            "Layers have uneven multi-qubit gate density, so "
-            "fold_gates_at_random targets the noisiest gates rather than "
-            "amplifying noise uniformly (arXiv:2005.10921).",
-            "RichardsonFactory provides polynomial interpolation suited "
-            "for moderate-depth circuits with non-uniform noise.",
-            "Four scale factors balance accuracy vs. shot overhead.",
+            _factory_rationale(profile),
+            _scaling_rationale(profile),
+            _scale_factor_rationale(profile),
         )
     if profile_name == "moderate":
         return (
             f"Circuit depth ({features.depth}) is in the moderate range "
             f"({profile.min_depth}-{profile.max_depth}) with noise category "
             f"'{features.noise_category}'.",
-            "RichardsonFactory uses polynomial interpolation that handles "
-            "moderate non-linear noise better than linear extrapolation "
-            "(Temme et al., PRL 119, 180509, 2017).",
-            "fold_global provides uniform noise amplification suitable "
-            "for structured circuits at moderate depth.",
-            "Four scale factors balance accuracy vs. shot overhead.",
+            _factory_rationale(profile),
+            _scaling_rationale(profile),
+            _scale_factor_rationale(profile),
         )
     return (
         f"Circuit depth ({features.depth}) < {profile.max_depth} with "
         f"{features.multi_qubit_gate_count} multi-qubit gates -- "
         f"noise category '{features.noise_category}'.",
-        "LinearFactory is sufficient when noise scales approximately "
-        "linearly with the folding factor (Li & Benjamin, PRX 7, "
-        "021050, 2017).",
-        "fold_global provides deterministic, reproducible noise "
-        "amplification for shallow circuits.",
-        "Three conservative scale factors minimize shot overhead "
-        "while providing a reliable linear fit.",
+        _factory_rationale(profile),
+        _scaling_rationale(profile),
+        _scale_factor_rationale(profile),
+    )
+
+
+def _factory_rationale(profile: ZneProfilePolicy) -> str:
+    if profile.factory == "LinearFactory":
+        return (
+            "LinearFactory fits a first-order extrapolation and is conservative "
+            "when noise is close to linear in the folding factor (Li & "
+            "Benjamin, PRX 7, 021050, 2017)."
+        )
+    if profile.factory == "RichardsonFactory":
+        return (
+            "RichardsonFactory uses polynomial interpolation for non-linear "
+            "noise scaling (Temme et al., PRL 119, 180509, 2017)."
+        )
+    if profile.factory == "PolyFactory":
+        order = profile.factory_kwargs.get("order", 2)
+        return (
+            f"PolyFactory(order={order}) fits a degree-{order} polynomial to "
+            "capture non-linear noise scaling (arXiv:2307.05203)."
+        )
+    return f"{profile.factory} is selected by the active policy."
+
+
+def _scaling_rationale(profile: ZneProfilePolicy) -> str:
+    if profile.scaling_method == "fold_global":
+        return (
+            "fold_global provides deterministic, uniform noise amplification "
+            "across the full circuit."
+        )
+    if profile.scaling_method == "fold_gates_at_random":
+        return (
+            "fold_gates_at_random uses gate-level folding to reduce coherent "
+            "artifacts from uniform folding (arXiv:2005.10921)."
+        )
+    return f"{profile.scaling_method} is selected by the active policy."
+
+
+def _scale_factor_rationale(profile: ZneProfilePolicy) -> str:
+    scale_factors = ", ".join(f"{factor:g}" for factor in profile.scale_factors)
+    return (
+        f"{len(profile.scale_factors)} scale factors ({scale_factors}) set the "
+        f"estimated shot overhead to ~{len(profile.scale_factors)}x."
     )
 
 
@@ -826,40 +856,42 @@ def _build_poly_recipe(features: CircuitFeatures) -> MitigationRecipe:
     return MitigationRecipe(
         technique="zne",
         factory_name="PolyFactory",
-        scale_factors=(1.0, 1.5, 2.0, 2.5, 3.0),
+        scale_factors=(1.0, 1.25, 1.5, 2.0),
         factory_kwargs=_freeze_kwargs({"order": 2}),
-        scaling_method="fold_gates_at_random",
+        scaling_method="fold_global",
         rationale=(
-            f"Circuit depth ({features.depth}) > 50 or noise category "
+            f"Circuit depth ({features.depth}) > {DEPTH_DEEP_THRESHOLD} "
+            f"or noise category "
             f"'{features.noise_category}' indicates strong non-linear noise.",
-            "PolyFactory with order=2 captures quadratic noise scaling "
-            "better than linear/Richardson for deep circuits.",
-            "fold_gates_at_random reduces coherent error accumulation "
-            "compared to uniform folding (arXiv:2005.10921).",
-            "Five scale factors provide sufficient data points for a "
-            "degree-2 polynomial fit (arXiv:2307.05203).",
+            "PolyFactory(order=2) fits a quadratic curve to capture "
+            "non-linear noise scaling (arXiv:2307.05203).",
+            "fold_global provides deterministic, uniform noise amplification "
+            "across the full circuit.",
+            "Four scale factors bound shot overhead while keeping enough "
+            "points for a degree-2 fit.",
         ),
         noise_category=features.noise_category,
-        estimated_overhead=5.0,
+        estimated_overhead=4.0,
     )
 
 
-def _build_richardson_recipe(features: CircuitFeatures) -> MitigationRecipe:
-    """Build a RichardsonFactory recipe for moderate-depth circuits."""
+def _build_moderate_linear_recipe(features: CircuitFeatures) -> MitigationRecipe:
+    """Build a benchmark-calibrated LinearFactory recipe for moderate circuits."""
     return MitigationRecipe(
         technique="zne",
-        factory_name="RichardsonFactory",
+        factory_name="LinearFactory",
         scale_factors=(1.0, 1.5, 2.0, 2.5),
         factory_kwargs=_freeze_kwargs({}),
-        scaling_method="fold_global",
+        scaling_method="fold_gates_at_random",
         rationale=(
             f"Circuit depth ({features.depth}) is in the moderate range "
-            f"(20-50) with noise category '{features.noise_category}'.",
-            "RichardsonFactory uses polynomial interpolation that handles "
-            "moderate non-linear noise better than linear extrapolation "
-            "(Temme et al., PRL 119, 180509, 2017).",
-            "fold_global provides uniform noise amplification suitable "
-            "for structured circuits at moderate depth.",
+            f"({DEPTH_MODERATE_THRESHOLD}-{DEPTH_DEEP_THRESHOLD}) with "
+            f"noise category '{features.noise_category}'.",
+            "LinearFactory fits a first-order extrapolation and is "
+            "conservative when noise is close to linear in the folding "
+            "factor (Li & Benjamin, PRX 7, 021050, 2017).",
+            "fold_gates_at_random uses gate-level folding to reduce coherent "
+            "artifacts from uniform folding (arXiv:2005.10921).",
             "Four scale factors balance accuracy vs. shot overhead.",
         ),
         noise_category=features.noise_category,
@@ -896,11 +928,11 @@ def _build_linear_recipe(features: CircuitFeatures) -> MitigationRecipe:
     return MitigationRecipe(
         technique="zne",
         factory_name="LinearFactory",
-        scale_factors=(1.0, 1.5, 2.0),
+        scale_factors=(1.0, 1.5, 2.0, 2.5, 3.0),
         factory_kwargs=_freeze_kwargs({}),
         scaling_method="fold_global",
         rationale=(
-            f"Circuit depth ({features.depth}) < 20 with "
+            f"Circuit depth ({features.depth}) < {DEPTH_MODERATE_THRESHOLD} with "
             f"{features.multi_qubit_gate_count} multi-qubit gates -- "
             f"noise category '{features.noise_category}'.",
             "LinearFactory is sufficient when noise scales approximately "
@@ -908,11 +940,11 @@ def _build_linear_recipe(features: CircuitFeatures) -> MitigationRecipe:
             "021050, 2017).",
             "fold_global provides deterministic, reproducible noise "
             "amplification for shallow circuits.",
-            "Three conservative scale factors minimize shot overhead "
-            "while providing a reliable linear fit.",
+            "Five scale factors provide more extrapolation points while "
+            "keeping overhead bounded.",
         ),
         noise_category=features.noise_category,
-        estimated_overhead=3.0,
+        estimated_overhead=5.0,
     )
 
 
@@ -945,20 +977,19 @@ def _build_fallback_recipe(features: CircuitFeatures) -> MitigationRecipe:
 #: Ordered list of ``(predicate, builder)`` rules.  First match wins.
 #:
 #: Priority order:
-#: 1. Deep / high-noise           ->  PolyFactory + fold_gates_at_random
+#: 1. Deep / high-noise           ->  PolyFactory + fold_global
 #: 2. Moderate + heterogeneous    ->  RichardsonFactory + fold_gates_at_random
-#: 3. Moderate depth (uniform)    ->  RichardsonFactory + fold_global
+#: 3. Moderate depth (uniform)    ->  LinearFactory + fold_gates_at_random
 #: 4. Shallow / low-gate          ->  LinearFactory + fold_global
 #:
-#: Order is load-bearing: ``_is_moderate_heterogeneous`` uses ``15 <= depth
-#: <= 50`` which overlaps with ``_is_shallow``'s ``depth < 20`` at depths
-#: 15-19, so heterogeneous must be checked before shallow.
+#: Order is load-bearing: heterogeneous profiles overlap with moderate-depth
+#: profiles, so heterogeneous must be checked before the uniform moderate rule.
 #:
 #: If none match, :func:`recommend` uses :func:`_build_fallback_recipe`.
 DEFAULT_RULES: tuple[Rule, ...] = (
     (_is_deep_or_high_noise, _build_poly_recipe),
     (_is_moderate_heterogeneous, _build_layerwise_richardson_recipe),
-    (_is_moderate_depth, _build_richardson_recipe),
+    (_is_moderate_depth, _build_moderate_linear_recipe),
     (_is_shallow, _build_linear_recipe),
 )
 
@@ -1024,46 +1055,48 @@ def recommend(
         )
     if rules is not None and policy is not None:
         raise ValueError("recommend() does not accept both rules and policy.")
+    active_policy = policy or DEFAULT_POLICY
+    zne_policy = active_policy if rules is None else None
 
     # --- technique override --------------------------------------------------
     if technique == "pec":
         return _with_warnings(
-            _build_pec_recipe(features, policy),
-            _forced_pec_warnings(features, policy),
+            _build_pec_recipe(features, active_policy),
+            _forced_pec_warnings(features, active_policy),
         )
     if technique == "cdr":
         return _with_warnings(
-            _build_cdr_recipe(features, policy),
-            _forced_cdr_warnings(features, policy),
+            _build_cdr_recipe(features, active_policy),
+            _forced_cdr_warnings(features, active_policy),
         )
     if technique == "composite":
         return _with_warnings(
             _build_composite_recipe(
                 features,
                 rules,
-                policy,
+                zne_policy,
                 force_components=True,
             ),
-            _forced_composite_warnings(features, rules, policy),
+            _forced_composite_warnings(features, rules, zne_policy),
         )
     if technique == "zne":
-        if policy is None:
+        if rules is not None:
             return _build_zne_recipe(features, rules)
         warnings = ()
-        if not policy.techniques.zne.enabled:
+        if not active_policy.techniques.zne.enabled:
             warnings = ("Forced ZNE: ZNE is disabled by policy.",)
         return _with_warnings(
-            _build_policy_zne_recipe(features, policy, force=True),
+            _build_policy_zne_recipe(features, active_policy, force=True),
             warnings,
         )
 
     # --- auto-select: try composite, PEC, then CDR ---------------------------
-    if technique is None and _should_use_composite(features, policy):
-        return _build_composite_recipe(features, rules, policy)
-    if technique is None and _should_use_pec(features, policy):
-        return _build_pec_recipe(features, policy)
-    if technique is None and _should_use_cdr(features, policy):
-        return _build_cdr_recipe(features, policy)
+    if technique is None and _should_use_composite(features, active_policy):
+        return _build_composite_recipe(features, rules, zne_policy)
+    if technique is None and _should_use_pec(features, active_policy):
+        return _build_pec_recipe(features, active_policy)
+    if technique is None and _should_use_cdr(features, active_policy):
+        return _build_cdr_recipe(features, active_policy)
 
     # --- ZNE rule chain ------------------------------------------------------
-    return _build_zne_recipe(features, rules, policy)
+    return _build_zne_recipe(features, rules, zne_policy)

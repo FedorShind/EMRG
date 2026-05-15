@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ def _minimal_result(cases: list[dict]) -> dict:
             "include_speed": True,
             "include_quality": True,
             "max_qubits": 5,
+            "split": "all",
         },
         "cases": cases,
         "summary": {},
@@ -83,17 +85,27 @@ def test_benchmark_corpus_has_unique_case_ids() -> None:
 
     cases = build_corpus(seed=1234, quick=False)
     case_ids = [case.case_id for case in cases]
+    train_ids = {case.case_id for case in build_corpus(split="train")}
+    holdout_ids = {case.case_id for case in build_corpus(split="holdout")}
 
     assert len(case_ids) == len(set(case_ids))
     assert {"bell_2q_zz_p001", "vqe_4q_2layers_z0_p001"}.issubset(case_ids)
+    assert train_ids
+    assert holdout_ids
+    assert train_ids.isdisjoint(holdout_ids)
+    assert train_ids | holdout_ids == set(case_ids)
 
 
-def test_default_v050_policy_snapshot_matches_default_policy() -> None:
-    snapshot = Path("benchmarks/policies/default-v050.json")
+def test_default_policy_snapshots_load_and_track_current_default() -> None:
+    v050 = Path("benchmarks/policies/default-v050.json")
+    v051 = Path("benchmarks/policies/default-v051.json")
 
-    loaded = load_policy(snapshot)
+    loaded_v050 = load_policy(v050)
+    loaded_v051 = load_policy(v051)
 
-    assert policy_to_dict(loaded) == policy_to_dict(DEFAULT_POLICY)
+    assert loaded_v050.name == "conservative-default"
+    assert policy_to_dict(loaded_v050) != policy_to_dict(DEFAULT_POLICY)
+    assert policy_to_dict(loaded_v051) == policy_to_dict(DEFAULT_POLICY)
 
 
 def test_quick_benchmark_runner_writes_schema_json(tmp_path: Path) -> None:
@@ -118,6 +130,7 @@ def test_quick_benchmark_runner_writes_schema_json(tmp_path: Path) -> None:
     assert data["schema_version"] == 1
     assert data["policy"]["sha256"]
     assert data["config"]["quick"] is True
+    assert data["config"]["split"] == "all"
     assert data["cases"]
 
     first_case = data["cases"][0]
@@ -127,10 +140,38 @@ def test_quick_benchmark_runner_writes_schema_json(tmp_path: Path) -> None:
         "num_qubits",
         "depth",
         "selected_recipe",
+        "stress_target",
+        "split",
         "speed",
         "quality",
     ):
         assert key in first_case
+
+
+def test_benchmark_runner_filters_split(tmp_path: Path) -> None:
+    output = tmp_path / "holdout.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "benchmarks/run_benchmark.py",
+            "--quick",
+            "--include-speed",
+            "--split",
+            "holdout",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    data = json.loads(output.read_text(encoding="utf-8"))
+    assert data["config"]["split"] == "holdout"
+    assert data["cases"]
+    assert {case["split"] for case in data["cases"]} == {"holdout"}
 
 
 def test_external_qasm_failures_are_recorded_per_file(tmp_path: Path) -> None:
@@ -228,4 +269,48 @@ def test_score_results_handles_quality_statuses_and_missing_fields() -> None:
     assert per_case["worse"]["score"] < 0
     assert per_case["missing"]["score"] == 0
     assert scored["summary"]["failure_rate"] > 0
+    assert scored["summary"]["score_case_count"] == 4
+    assert scored["summary"]["quality_skipped_case_count"] == 1
     assert "unit" in scored["families"]
+
+
+def test_score_results_quality_signal_survives_speed_only_cases() -> None:
+    from benchmarks.score_results import score_document
+
+    speed_only_cases = [
+        _case(
+            f"speed-{index}",
+            quality={
+                "ideal": None,
+                "noisy": None,
+                "mitigated": None,
+                "noisy_error": None,
+                "mitigated_error": None,
+                "error_reduction": None,
+                "runtime_seconds": None,
+                "status": "skipped",
+                "skip_reason": "speed-only benchmark case",
+                "failure": None,
+            },
+        )
+        for index in range(8)
+    ]
+    scored = score_document(_minimal_result([_case("passed"), *speed_only_cases]))
+
+    assert scored["summary"]["final_score"] > 0
+    assert scored["summary"]["score_case_count"] == 1
+    assert scored["summary"]["speed_only_case_count"] == 8
+
+
+def test_policy_search_generates_valid_candidate_policy() -> None:
+    from benchmarks.search_policy import (
+        generate_candidate_policy,
+        validate_search_policy,
+    )
+
+    base = policy_to_dict(DEFAULT_POLICY)
+    candidate = generate_candidate_policy(base, rng=random.Random(1234), index=1)
+    policy = validate_search_policy(candidate)
+
+    assert policy_to_dict(policy) == candidate
+    assert candidate != base

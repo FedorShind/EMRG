@@ -26,6 +26,7 @@ class BenchmarkCase:
     run_quality_by_default: bool = True
     speed_only: bool = False
     quick: bool = False
+    split: str = "train"
 
 
 def bell() -> QuantumCircuit:
@@ -227,12 +228,20 @@ def speed_random(n_qubits: int, layers: int) -> QuantumCircuit:
     return qc
 
 
-def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCase, ...]:
+def build_corpus(
+    *,
+    seed: int = 1234,
+    quick: bool = False,
+    split: str = "all",
+) -> tuple[BenchmarkCase, ...]:
     """Return the fixed internal benchmark corpus.
 
     The seed is accepted for API symmetry with the runner. Individual circuit
     builders use stable local seeds so case IDs remain reproducible.
     """
+    if split not in {"train", "holdout", "all"}:
+        raise ValueError("split must be 'train', 'holdout', or 'all'.")
+
     _ = seed
     cases = (
         BenchmarkCase(
@@ -250,18 +259,21 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "zne_linear",
             observable="ZZ",
             quick=True,
+            split="holdout",
         ),
         BenchmarkCase(
             "bernstein_vazirani_5q_z0_p001",
             "bernstein_vazirani",
             bernstein_vazirani,
             "zne_linear",
+            split="train",
         ),
         BenchmarkCase(
             "deutsch_jozsa_4q_z0_p001",
             "deutsch_jozsa",
             deutsch_jozsa,
             "zne_linear",
+            split="holdout",
         ),
         BenchmarkCase(
             "qft_5q_z0_p001",
@@ -269,6 +281,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             qft_style,
             "cdr",
             run_quality_by_default=False,
+            split="train",
         ),
         BenchmarkCase(
             "qaoa_6q_2layers_zz_p001",
@@ -277,6 +290,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "cdr",
             observable="ZZ",
             run_quality_by_default=False,
+            split="holdout",
         ),
         BenchmarkCase(
             "vqe_4q_2layers_z0_p001",
@@ -290,6 +304,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "random_cliffordish",
             random_cliffordish,
             "zne_linear",
+            split="holdout",
         ),
         BenchmarkCase(
             "rotation_heavy_4q_z0_p001",
@@ -297,12 +312,14 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             moderate_cdr_eligible,
             "cdr",
             quick=True,
+            split="train",
         ),
         BenchmarkCase(
             "cx_cz_layers_6q_z0_p001",
             "cx_cz_layers",
             repeated_cx_cz_layers,
             "zne_richardson",
+            split="train",
         ),
         BenchmarkCase(
             "heterogeneous_12q_z0_p001",
@@ -310,6 +327,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             lambda: heterogeneous_layers(12, 6),
             "layerwise",
             run_quality_by_default=False,
+            split="holdout",
         ),
         BenchmarkCase(
             "shallow_pec_3q_zz_p001",
@@ -319,6 +337,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             observable="ZZ",
             noise_model_available=True,
             quick=True,
+            split="train",
         ),
         BenchmarkCase(
             "moderate_cdr_4q_z0_p003",
@@ -326,6 +345,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             moderate_cdr_eligible,
             "cdr",
             noise_level=0.03,
+            split="holdout",
         ),
         BenchmarkCase(
             "deep_zne_5q_z0_p001",
@@ -333,6 +353,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             deeper_zne_oriented,
             "zne_deep",
             run_quality_by_default=False,
+            split="train",
         ),
         BenchmarkCase(
             "composite_4q_z0_p001",
@@ -341,6 +362,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "composite",
             noise_model_available=True,
             run_quality_by_default=False,
+            split="holdout",
         ),
         BenchmarkCase(
             "speed_random_20q_6layers",
@@ -349,6 +371,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "speed_only",
             speed_only=True,
             run_quality_by_default=False,
+            split="train",
         ),
         BenchmarkCase(
             "speed_random_30q_8layers",
@@ -357,6 +380,7 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "speed_only",
             speed_only=True,
             run_quality_by_default=False,
+            split="train",
         ),
         BenchmarkCase(
             "speed_random_50q_10layers",
@@ -365,8 +389,12 @@ def build_corpus(*, seed: int = 1234, quick: bool = False) -> tuple[BenchmarkCas
             "speed_only",
             speed_only=True,
             run_quality_by_default=False,
+            split="holdout",
         ),
     )
+    selected = cases
+    if split != "all":
+        selected = tuple(case for case in selected if case.split == split)
     if quick:
-        return tuple(case for case in cases if case.quick or case.speed_only)
-    return cases
+        return tuple(case for case in selected if case.quick or case.speed_only)
+    return selected

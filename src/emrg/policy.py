@@ -677,18 +677,18 @@ _DEFAULT_POLICY_DATA: dict[str, Any] = {
         "zne": {
             "enabled": True,
             "shallow": {
-                "max_depth": 20,
+                "max_depth": 18,
                 "max_multi_qubit_gates": 50,
                 "factory": "LinearFactory",
-                "scale_factors": [1.0, 1.5, 2.0],
+                "scale_factors": [1.0, 1.5, 2.0, 2.5, 3.0],
                 "scaling_method": "fold_global",
             },
             "moderate": {
-                "min_depth": 20,
-                "max_depth": 50,
-                "factory": "RichardsonFactory",
+                "min_depth": 18,
+                "max_depth": 55,
+                "factory": "LinearFactory",
                 "scale_factors": [1.0, 1.5, 2.0, 2.5],
-                "scaling_method": "fold_global",
+                "scaling_method": "fold_gates_at_random",
             },
             "heterogeneous": {
                 "min_depth": 15,
@@ -699,11 +699,11 @@ _DEFAULT_POLICY_DATA: dict[str, Any] = {
                 "scaling_method": "fold_gates_at_random",
             },
             "deep": {
-                "min_depth": 51,
+                "min_depth": 56,
                 "factory": "PolyFactory",
                 "factory_kwargs": {"order": 2},
-                "scale_factors": [1.0, 1.5, 2.0, 2.5, 3.0],
-                "scaling_method": "fold_gates_at_random",
+                "scale_factors": [1.0, 1.25, 1.5, 2.0],
+                "scaling_method": "fold_global",
             },
         },
         "pec": {
@@ -717,13 +717,13 @@ _DEFAULT_POLICY_DATA: dict[str, Any] = {
         },
         "cdr": {
             "enabled": True,
-            "min_depth": 10,
+            "min_depth": 12,
             "max_depth": 40,
-            "min_non_clifford_fraction": 0.2,
+            "min_non_clifford_fraction": 0.3,
             "training_circuits": {
-                "small": 8,
-                "medium": 12,
-                "large": 16,
+                "small": 6,
+                "medium": 10,
+                "large": 14,
                 "medium_gate_threshold": 20,
                 "large_gate_threshold": 50,
             },

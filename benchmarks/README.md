@@ -42,6 +42,14 @@ The baseline output includes:
 - selected recipe data from `MitigationRecipe.to_dict()`
 - aggregate summary fields
 
+Use `--split train`, `--split holdout`, or `--split all` to separate
+calibration runs from validation runs:
+
+```powershell
+.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --split train --policy benchmarks\policies\default-v050.json --output benchmarks\results\baseline-train.json
+.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --split holdout --policy benchmarks\policies\default-v050.json --output benchmarks\results\baseline-holdout.json
+```
+
 ## Candidate Comparison
 
 ```powershell
@@ -52,6 +60,29 @@ The baseline output includes:
 Do not treat a higher calibration score as release proof. A candidate policy
 needs a holdout run before changing `DEFAULT_POLICY` or updating public
 performance claims.
+
+## Policy Search
+
+`search_policy.py` runs a small, fixed-seed random search over safe policy
+fields only. It writes candidate policies, benchmark results, scores, and a
+summary under `benchmarks/results/`, which is ignored because these files are
+machine-specific.
+
+```powershell
+.\.venv\Scripts\python.exe benchmarks\search_policy.py --base-policy benchmarks\policies\default-v050.json --baseline benchmarks\results\baseline-v050.json --output-dir benchmarks\results\policy-search-quick --seed 1234 --trials 50 --quick
+```
+
+The search is a calibration tool, not a release claim. Promote a candidate to
+`DEFAULT_POLICY` only after train and holdout runs show better quality without
+new failures, a suspicious skip-rate jump, or indefensible overhead.
+
+For the v0.5.1 default-policy calibration, the accepted policy was validated
+against `default-v050.json` with `--seed 1234 --repeats 5 --include-speed
+--include-quality`. On the local Windows 11 / Python 3.12.10 environment
+(Qiskit 2.3.0, Mitiq 0.48.1, NumPy 1.26.4), the full internal corpus score
+changed from `0.7872` to `1.8455` with no new failures and the same skip count
+(`8/18`). Treat this as a reproducible local calibration result, not a hardware
+claim.
 
 ## External QASM
 

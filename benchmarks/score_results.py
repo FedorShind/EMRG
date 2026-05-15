@@ -58,26 +58,65 @@ def _instability_penalty(quality: dict[str, Any]) -> float:
     return 0.1 * math.log1p(abs(float(std)) / scale)
 
 
-def score_case(case: dict[str, Any]) -> float:
+def _skip_reason(case: dict[str, Any]) -> str:
+    reason = (case.get("quality") or {}).get("skip_reason")
+    if not isinstance(reason, str):
+        return ""
+    return reason.lower()
+
+
+def _is_speed_only_skip(case: dict[str, Any]) -> bool:
+    reason = _skip_reason(case)
+    return "speed-only" in reason
+
+
+def _score_reason(case: dict[str, Any]) -> str:
     quality = case.get("quality") or {}
     status = quality.get("status")
-    overhead = _estimated_overhead(case)
 
     if status == "failed":
-        return -10.0
+        return "failed"
     if status == "skipped":
-        return 0.0
+        if _is_speed_only_skip(case):
+            return "speed_only"
+        return "quality_skipped"
 
     noisy_error = quality.get("noisy_error")
     mitigated_error = quality.get("mitigated_error")
     if not isinstance(noisy_error, int | float) or not isinstance(
         mitigated_error, int | float
     ):
-        return 0.0
+        return "missing_quality_metrics"
 
     noisy_error = abs(float(noisy_error))
     mitigated_error = abs(float(mitigated_error))
     if mitigated_error > noisy_error:
+        return "worse_than_noisy"
+    return "quality_improved"
+
+
+def _contributes_to_final(reason: str) -> bool:
+    return reason in {
+        "failed",
+        "missing_quality_metrics",
+        "worse_than_noisy",
+        "quality_improved",
+    }
+
+
+def score_case(case: dict[str, Any]) -> float:
+    quality = case.get("quality") or {}
+    reason = _score_reason(case)
+    overhead = _estimated_overhead(case)
+
+    if reason == "failed":
+        return -10.0
+    if reason in {"speed_only", "quality_skipped", "missing_quality_metrics"}:
+        return 0.0
+
+    noisy_error = abs(float(quality["noisy_error"]))
+    mitigated_error = abs(float(quality["mitigated_error"]))
+    if reason == "worse_than_noisy":
         base = -1.0
     else:
         ratio = min(noisy_error / max(mitigated_error, EPSILON), 1_000.0)
@@ -126,9 +165,14 @@ def _family_scores(cases: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
     families: dict[str, dict[str, Any]] = {}
     for family, family_cases in grouped.items():
-        scores = [float(case["score"]) for case in family_cases]
+        scores = [
+            float(case["score"])
+            for case in family_cases
+            if case.get("score_contributes_to_final")
+        ]
         families[family] = {
             "case_count": len(family_cases),
+            "score_case_count": len(scores),
             "median_score": _median(scores),
             "p25_score": _percentile(scores, 0.25),
         }
@@ -136,8 +180,11 @@ def _family_scores(cases: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 
 def _summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
-    scores = [float(case["score"]) for case in cases]
+    scores = [
+        float(case["score"]) for case in cases if case.get("score_contributes_to_final")
+    ]
     quality_statuses = [(case.get("quality") or {}).get("status") for case in cases]
+    score_reasons = [case.get("score_reason") for case in cases]
     speed_values = _speed_values(cases)
     reductions = _error_reductions(cases)
     final_score = 0.0
@@ -151,6 +198,14 @@ def _summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "pass_rate": quality_statuses.count("passed") / total,
         "failure_rate": quality_statuses.count("failed") / total,
         "skip_rate": quality_statuses.count("skipped") / total,
+        "score_case_count": len(scores),
+        "quality_improved_case_count": score_reasons.count("quality_improved"),
+        "worse_than_noisy_case_count": score_reasons.count("worse_than_noisy"),
+        "missing_quality_metric_case_count": score_reasons.count(
+            "missing_quality_metrics"
+        ),
+        "quality_skipped_case_count": score_reasons.count("quality_skipped"),
+        "speed_only_case_count": score_reasons.count("speed_only"),
         "median_speed_ms": _median(speed_values),
         "p95_speed_ms": _percentile(speed_values, 0.95),
         "median_error_reduction": _median(reductions),
@@ -164,7 +219,11 @@ def score_document(document: dict[str, Any]) -> dict[str, Any]:
     cases = []
     for case in document.get("cases", []):
         scored_case = dict(case)
+        score_reason = _score_reason(scored_case)
         scored_case["score"] = score_case(scored_case)
+        scored_case["score_reason"] = score_reason
+        scored_case["score_contributes_to_final"] = _contributes_to_final(score_reason)
+        scored_case["estimated_overhead"] = _estimated_overhead(scored_case)
         cases.append(scored_case)
 
     return {
@@ -189,6 +248,13 @@ def _print_summary(scored: dict[str, Any], baseline: dict[str, Any] | None) -> N
     summary = scored["summary"]
     print(f"Final score: {summary['final_score']:.4f}")
     print(
+        "Scored quality cases: "
+        f"{summary['score_case_count']}/{summary['case_count']} "
+        f"(improved={summary['quality_improved_case_count']}, "
+        f"worse={summary['worse_than_noisy_case_count']}, "
+        f"missing={summary['missing_quality_metric_case_count']})"
+    )
+    print(
         "Quality pass/fail/skip: "
         f"{summary['pass_rate']:.1%}/"
         f"{summary['failure_rate']:.1%}/"
@@ -208,6 +274,29 @@ def _print_summary(scored: dict[str, Any], baseline: dict[str, Any] | None) -> N
         )
     print(f"Median overhead: {summary['median_estimated_overhead']:.3f}")
     print(f"Technique distribution: {summary['selected_techniques']}")
+    print("Case breakdown:")
+    for case in scored["cases"]:
+        quality = case.get("quality") or {}
+        reduction = quality.get("error_reduction")
+        reduction_text = (
+            f"{reduction:.3f}x" if isinstance(reduction, int | float) else "-"
+        )
+        print(
+            "  {case_id}: {family} {technique} {status} "
+            "score={score:.4f} reduction={reduction} overhead={overhead:.3f} "
+            "reason={reason}".format(
+                case_id=case.get("case_id"),
+                family=case.get("family"),
+                technique=(case.get("selected_recipe") or {}).get(
+                    "technique", "unknown"
+                ),
+                status=quality.get("status", "unknown"),
+                score=float(case.get("score", 0.0)),
+                reduction=reduction_text,
+                overhead=float(case.get("estimated_overhead", 1.0)),
+                reason=case.get("score_reason"),
+            )
+        )
 
     if baseline is not None:
         delta = summary["final_score"] - baseline["summary"]["final_score"]

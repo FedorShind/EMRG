@@ -151,10 +151,10 @@ _ROTATION_GATE_NAMES: frozenset[str] = frozenset(
 )
 
 #: Minimum non-Clifford gate fraction for CDR to be considered.
-CDR_NON_CLIFFORD_FRACTION_THRESHOLD: float = 0.2
+CDR_NON_CLIFFORD_FRACTION_THRESHOLD: float = 0.3
 
 #: Minimum circuit depth for CDR consideration.
-CDR_MIN_DEPTH: int = 10
+CDR_MIN_DEPTH: int = 12
 
 #: Maximum circuit depth for CDR consideration.
 CDR_MAX_DEPTH: int = 40
