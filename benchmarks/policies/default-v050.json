@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "name": "conservative-default",
+  "budget": {
+    "max_overhead": 1000.0,
+    "max_scale_factors": 5,
+    "allow_composite": true
+  },
+  "techniques": {
+    "zne": {
+      "enabled": true,
+      "shallow": {
+        "factory": "LinearFactory",
+        "scale_factors": [
+          1.0,
+          1.5,
+          2.0
+        ],
+        "scaling_method": "fold_global",
+        "max_depth": 20,
+        "max_multi_qubit_gates": 50
+      },
+      "moderate": {
+        "factory": "RichardsonFactory",
+        "scale_factors": [
+          1.0,
+          1.5,
+          2.0,
+          2.5
+        ],
+        "scaling_method": "fold_global",
+        "min_depth": 20,
+        "max_depth": 50
+      },
+      "heterogeneous": {
+        "factory": "RichardsonFactory",
+        "scale_factors": [
+          1.0,
+          1.5,
+          2.0,
+          2.5
+        ],
+        "scaling_method": "fold_gates_at_random",
+        "min_depth": 15,
+        "max_depth": 50,
+        "min_layer_heterogeneity": 2.0
+      },
+      "deep": {
+        "factory": "PolyFactory",
+        "scale_factors": [
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0
+        ],
+        "scaling_method": "fold_gates_at_random",
+        "min_depth": 51,
+        "factory_kwargs": {
+          "order": 2
+        }
+      }
+    },
+    "pec": {
+      "enabled": true,
+      "requires_noise_model": true,
+      "max_depth": 30,
+      "max_overhead": 1000.0,
+      "noise_level": 0.01,
+      "min_samples": 100,
+      "max_samples": 500
+    },
+    "cdr": {
+      "enabled": true,
+      "min_depth": 10,
+      "max_depth": 40,
+      "min_non_clifford_fraction": 0.2,
+      "training_circuits": {
+        "small": 8,
+        "medium": 12,
+        "large": 16,
+        "medium_gate_threshold": 20,
+        "large_gate_threshold": 50
+      }
+    },
+    "composite": {
+      "enabled": true,
+      "min_depth": 15,
+      "max_depth": 30,
+      "max_combined_overhead": 1000.0
+    }
+  }
+}

@@ -257,7 +257,26 @@ EMRG/
 
 ## Benchmarks
 
-Reference benchmark snapshot collected by [`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py) on EMRG v0.3.0. Rerun the benchmark script before using these numbers for new release claims.
+EMRG includes a reproducible benchmark harness for v0.5.1 calibration work.
+It writes machine-readable JSON under `benchmarks/results/` and scores runs
+separately, so default-policy changes can be compared against a fixed baseline
+instead of tuned by anecdote.
+
+```powershell
+.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --quick --output benchmarks\results\quick.json
+.\.venv\Scripts\python.exe benchmarks\score_results.py benchmarks\results\quick.json
+
+.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --policy benchmarks\policies\default-v050.json --output benchmarks\results\baseline-v050.json
+.\.venv\Scripts\python.exe benchmarks\score_results.py benchmarks\results\baseline-v050.json
+```
+
+See [`benchmarks/README.md`](benchmarks/README.md) for the benchmark philosophy,
+external QASM guidance, and candidate-policy comparison workflow.
+
+The numeric tables below are a historical reference snapshot collected by
+[`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py) on EMRG v0.3.0.
+Rerun the current benchmark harness before using these numbers for new release
+claims.
 
 > **Environment:** Python 3.12, Windows 11 | Qiskit 2.3.0, Mitiq 0.48.1
 

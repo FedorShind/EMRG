@@ -48,3 +48,5 @@ INFO.md
 
 # Benchmark results (machine-specific; regenerate locally)
 benchmarks/results.json
+benchmarks/results/*.json
+!benchmarks/results/.gitkeep
