@@ -314,7 +314,9 @@ claims.
 | Random 30q, 10 layers | 30 | 21 | 450 | 150 | 0.94 | CDR (16 training) | 2.41 ms | 116.3 KB |
 | Random 50q, 15 layers | 50 | 31 | 1125 | 375 | 0.96 | CDR (16 training) | 5.81 ms | 282.0 KB |
 
-A 50-qubit, 1125-gate circuit is analyzed and produces a full mitigation recipe in under 6 ms. Circuits with non-Clifford rotations are automatically routed to CDR.
+In this historical snapshot, a 50-qubit, 1125-gate circuit was analyzed and
+produced a full mitigation recipe in under 6 ms. Several non-Clifford rotation
+circuits were routed to CDR under the older default policy.
 
 ### ZNE Fidelity
 
@@ -366,7 +368,9 @@ ZNE excels on structured circuits where noise scales predictably with folding (X
 | Extreme 10q | 10 | 13 | 2.50 | p=0.01 | 0.5x | 0.4x | -- |
 | Extreme 10q | 10 | 13 | 2.50 | p=0.03 | 0.5x | 0.1x | global |
 
-`fold_global` is more reliable at this scale because `fold_gates_at_random` adds stochastic variation to the extrapolation fit. Layerwise folding shows occasional strong results (12.6x on VQE at low noise) but is not consistent enough to be the default. EMRG defaults to `fold_global` and uses layerwise folding conservatively for high-heterogeneity circuits.
+This historical snapshot showed mixed results for random gate folding. v0.5.1
+uses policy-calibrated ZNE profiles, so the table should not be read as a
+current universal rule for `fold_global` or `fold_gates_at_random`.
 
 ### CDR vs ZNE
 
@@ -379,7 +383,10 @@ CDR replaces non-Clifford gates with Clifford substitutes to create classically 
 | VQE 4q, 2 layers | p=0.01 | 0.0055 | 1.4x | 0.0036 | **2.1x** | CDR |
 | VQE 4q, 2 layers | p=0.03 | 0.0162 | 1.3x | 0.0108 | **1.9x** | CDR |
 
-CDR recovers near-ideal expectation values on rotation-heavy circuits and consistently outperforms ZNE on VQE circuits at both low and moderate noise. EMRG auto-selects CDR when the non-Clifford gate fraction exceeds 20% and depth is between 10 and 40.
+This historical snapshot favored CDR on the listed rotation-heavy and VQE
+circuits. In v0.5.1, EMRG auto-selects CDR when the non-Clifford gate fraction
+exceeds 30% and depth is between 12 and 40; otherwise the policy may select ZNE
+if the benchmark-calibrated profile is a better fit.
 
 ### Reproduce
 ```
