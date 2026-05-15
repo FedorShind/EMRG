@@ -40,6 +40,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.4",
+    "nbformat>=5.0",
     "cirq-core>=1.0",
     # ply is a soft dep of cirq.contrib.qasm_import that cirq-core does
     # not declare; required by preview tests because the Mitiq->Cirq
