@@ -3,65 +3,74 @@
 [![CI](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml/badge.svg)](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
 
-**Error Mitigation Recipe Generator** -- Automatic quantum error mitigation for NISQ circuits.
+**Error Mitigation Recipe Generator** for [Mitiq](https://mitiq.readthedocs.io/).
 
-EMRG analyzes a quantum circuit and generates [Mitiq](https://mitiq.readthedocs.io/) error mitigation code with the right imports, parameters, and rationale. It selects between ZNE, PEC, CDR, and composite ZNE-over-PEC recipes so you only need to connect the generated executor adapter to your simulator or hardware backend.
+EMRG reads a Qiskit circuit, chooses right mitigation recipe, and renders the
+Mitiq code to run it. The problem of choosing the recipe is what EMRG helps with.
+EMRG is the small deterministic layer in between.
 
-> **v0.5.1** -- Benchmark-calibrated default policy + reproducible benchmark/search harness. [Roadmap](#roadmap) below.
+## The idea
 
----
+NISQ error mitigation has too many knobs. ZNE needs scale factors and a folding
+method. PEC needs a noise model and a sampling budget. CDR needs enough
+non-Clifford structure to train against. Composite recipes can help, but only
+when their cost is still sane.
 
-## Why EMRG?
+EMRG *is a recipe layer*. It is not a new mitigation primitive.
 
-No single mitigation technique fits every NISQ circuit. ZNE needs useful noise-scaling behavior, PEC needs a noise model and manageable sampling overhead, CDR needs enough non-Clifford structure to train against, and composite ZNE-over-PEC is only worth its cost on moderate-depth PEC-eligible circuits. EMRG automates that choice: give it a circuit, get back runnable mitigation code with rationale for every parameter choice.
+It inspects a circuit, picks from ZNE, PEC, CDR, or composite ZNE-over-PEC, then
+outputs Mitiq-native Python with the reason for the choice. It is intentionally
+boring: inspect, choose, render.
 
-## How It Works
+## How it works
+
+```text
+Qiskit circuit or QASM
+        |
+        v
+analyze features -> choose policy recipe -> render Mitiq code -> optional preview
 ```
-Quantum Circuit --> [Analyze] --> [Technique Selection] --> [Code Generator] --> Mitigated Code
-                                     Composite / PEC / CDR / ZNE
-```
 
-1. **Parse & Validate** -- Load a Qiskit `QuantumCircuit` or QASM file.
-2. **Extract Features** -- Depth, gate counts, noise factor, non-Clifford fraction, PEC overhead, layer heterogeneity.
-3. **Select Technique** -- Use priority rules: composite for eligible moderate-depth circuits, PEC for shallow low-overhead noise-model cases, CDR for non-Clifford-heavy circuits, otherwise ZNE.
-4. **Generate Code** -- Runnable Python with Mitiq imports, configuration, and inline rationale.
+1. Analyze circuit features: depth, gate mix, noise proxy, PEC overhead,
+   layer heterogeneity, and non-Clifford fraction.
+2. Pick a recipe from the active policy.
+3. Generate Mitiq code with imports, parameters, and rationale.
+4. Optionally preview the recipe with a local simulator.
 
-### Heuristic Rules (v0.5.1 default policy)
+## Quick start
 
-| Circuit Profile | Technique | Configuration | Rationale |
-|---|---|---|---|
-| Depth 15--30 + moderate noise + noise model + combined overhead <= 1000 | **Composite (ZNE over PEC)** | ZNE factory over PEC executor | PEC corrects each noise-scaled circuit before ZNE extrapolates residual bias |
-| Depth <= 30 + noise model + overhead < 1000 | **PEC** | Depolarizing representations | Unbiased error cancellation when overhead is manageable |
-| Non-Clifford fraction > 30% + depth 12--40 | **CDR** | 6--14 training circuits, linear fit | Clifford substitution + regression when non-Clifford content is high enough to justify CDR |
-| Depth < 18, low multi-qubit gates | ZNE `LinearFactory` | `[1.0, 1.5, 2.0, 2.5, 3.0]` + `fold_global` | More extrapolation points for shallow circuits, at bounded overhead |
-| Depth 18--55 | ZNE `LinearFactory` | `[1.0, 1.5, 2.0, 2.5]` + `fold_gates_at_random` | Calibration favored lower-order extrapolation with gate-level folding on the internal corpus |
-| Depth > 55 or high noise | ZNE `PolyFactory(order=2)` | `[1.0, 1.25, 1.5, 2.0]` + `fold_global` | Captures non-linear noise while avoiding unnecessary scale factors |
-
-## Quick Start
-
-### Installation
-```
+```bash
 pip install emrg
 ```
 
-For preview mode (noisy simulation comparison):
-```
-pip install emrg[preview]
+From a source checkout:
+
+```powershell
+emrg analyze docs/examples/bell_state.qasm
+emrg generate docs/examples/bell_state.qasm
 ```
 
-For YAML policy files:
-```
-pip install emrg[config]
+Python:
+
+```python
+from qiskit import QuantumCircuit
+from emrg import generate_recipe
+
+qc = QuantumCircuit(2, 2)
+qc.h(0)
+qc.cx(0, 1)
+qc.measure([0, 1], [0, 1])
+
+result = generate_recipe(qc)
+print(result.code)
+print(result.rationale)
 ```
 
-Or from source:
-```
-git clone https://github.com/FedorShind/EMRG.git
-cd EMRG
-pip install -e ".[dev,preview,config,qasm3]"
-```
 
 Or try it without installing: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
+
+The generated script contains a backend executor adapter. You still connect
+that adapter to your simulator or hardware backend.
 
 ### CLI Usage
 ```
@@ -103,140 +112,66 @@ emrg analyze circuit.qasm
 emrg analyze circuit.qasm --json
 ```
 
-### Python API
-```python
-from qiskit import QuantumCircuit
-from emrg import generate_recipe, load_policy
+## Policies
 
-# Create a circuit
-qc = QuantumCircuit(2, 2)
-qc.h(0)
-qc.cx(0, 1)
-qc.measure([0, 1], [0, 1])
+EMRG ships with a built-in default policy. Policies tune thresholds, overhead
+budgets, and Mitiq factory/scaling choices. Policies are data, not code: they
+do not execute Python, import modules, or define arbitrary logic.
 
-# Generate mitigation recipe (one-liner)
-result = generate_recipe(qc)
-print(result)             # Ready-to-run Python script
-print(result.rationale)   # Why these parameters were chosen
-print(result.features)    # Circuit analysis details
+JSON policies work in the base install. YAML policies require:
 
-# With PEC (requires noise model availability)
-result = generate_recipe(qc, noise_model_available=True)
-
-# With a policy file
-policy = load_policy("emrg-policy.json")
-result = generate_recipe(qc, policy=policy)
-
-# Force CDR (requires cirq: pip install emrg[preview])
-result = generate_recipe(qc, technique="cdr")
-
-# Force composite ZNE-over-PEC (requires noise model availability)
-result = generate_recipe(qc, technique="composite", noise_model_available=True)
-
-# With preview simulation
-result = generate_recipe(qc, preview=True, noise_level=0.01)
-print(result.preview)     # Simulation comparison results
+```bash
+pip install "emrg[config]"
 ```
 
-## Policy Files
+Smallest useful flow:
 
-Policies tune EMRG's existing rule-based heuristics. They can enable or disable techniques, adjust thresholds and overhead budgets, and choose supported Mitiq factory/scaling settings. They do not execute Python, import code, or define arbitrary logic.
-
-JSON policies work with the base install. YAML policies use `yaml.safe_load()` and require `pip install emrg[config]`.
-
-```
+```powershell
 emrg policy init emrg-policy.json
+emrg policy validate emrg-policy.json
 emrg generate circuit.qasm --policy emrg-policy.json
 ```
 
-Python:
-```python
-from emrg import generate_recipe, load_policy
+Use the generated policy file as the schema reference. The implementation lives
+in `src/emrg/policy.py`.
 
-policy = load_policy("emrg-policy.json")
-result = generate_recipe(qc, policy=policy)
+## Preview mode
+
+Preview mode runs a neat local simulator check:
+
+```bash
+pip install "emrg[preview]"
+emrg generate docs/examples/bell_state.qasm --preview
 ```
 
-Policy excerpt:
-```yaml
-version: 1
-name: shallow-two-point-zne
+It uses density-matrix simulation, so size matters. Circuits above the preview
+budget are skipped with a plain warning. PEC, CDR, and composite previews can
+vary because they include stochastic pieces.
 
-techniques:
-  zne:
-    shallow:
-      factory: LinearFactory
-      scale_factors: [1.0, 2.0]
-      scaling_method: fold_global
-```
+## Benchmarks
 
-Policy files are complete, strict documents. Use `emrg policy init` to create the full schema, then edit the fields you want to tune.
+v0.5.1 includes a reproducible local benchmark harness. It compares policy
+choices under simulator and noise-model setups. This is useful for regression
+testing and local policy calibration. It is not a hardware performance claim.
 
-Without `--policy` or `policy=...`, EMRG uses the built-in default policy.
-Use `benchmarks/policies/default-v050.json` to reproduce the v0.5.0
-calibration baseline.
+Compact local calibration snapshot:
 
-### Example Output
-```
-# =============================================================
-# EMRG v0.5.1 -- Error Mitigation Recipe
-# Circuit: 2 qubits, depth 3, 1 multi-qubit gates
-# Noise estimate: 0.011 (low)
-# =============================================================
-#
-# Recommendation: LinearFactory + fold_global
-#
-# =============================================================
+| Policy | Score | Median error reduction | Failures | Skips |
+|---|---:|---:|---:|---:|
+| `default-v050.json` | 0.7872 | 2.357x | 0 | 8/18 |
+| `default-v051.json` | 1.8455 | 4.779x | 0 | 8/18 |
 
-from mitiq.zne import execute_with_zne
-from mitiq.zne.inference import LinearFactory
-from mitiq.zne.scaling import fold_global
+Benchmark numbers are local simulator results. Run
+`benchmarks/run_benchmark.py` to write machine-readable JSON under
+`benchmarks/results/`, then score it with `benchmarks/score_results.py`.
+Skipped simulations are recorded explicitly, not counted as passes.
+Do not commit generated benchmark JSON or external QASM datasets.
 
-factory = LinearFactory(scale_factors=[1.0, 1.5, 2.0])
+Older detailed benchmark tables live in
+[`benchmarks/HISTORICAL_RESULTS.md`](benchmarks/HISTORICAL_RESULTS.md).
 
-def execute(circuit):
-    """Execute a circuit and return an expectation value (float)."""
-    # Connect this adapter to your simulator or hardware backend.
-    raise NotImplementedError("Configure execute() for your backend.")
+## Project structure
 
-mitigated_value = execute_with_zne(
-    circuit,
-    execute,
-    factory=factory,
-    scale_noise=fold_global,
-)
-
-print(f"Mitigated expectation value: {mitigated_value}")
-```
-
-## Preview Mode
-
-`--preview` runs a noisy simulation, applies the recommended mitigation, and displays a before/after comparison. This validates the recipe before spending real hardware shots.
-```
-emrg generate circuit.qasm --preview
-```
-```
-┌─────────────────────────────────────────────────┐
-│  EMRG Preview -- Simulation Comparison         │
-├─────────────────────────────────────────────────┤
-│  Circuit:    2 qubits, depth 3                 │
-│  Noise:      depolarizing p=0.01               │
-│  Observable: <Z> on qubit 0                    │
-│  Technique:  ZNE                               │
-├─────────────────────────────────────────────────┤
-│  Ideal:      -1.0000                           │
-│  Noisy:      -0.9761  (error: 0.0239)          │
-│  Mitigated:  -1.0003  (error: 0.0003)          │
-│                                                │
-│  Error reduction: 77.5x                        │
-└─────────────────────────────────────────────────┘
-```
-
-Uses Cirq's `DensityMatrixSimulator` with per-gate depolarizing noise. Circuits above 10 qubits are skipped (density matrix cost scales as O(4^n)). PEC preview uses 200 samples; composite preview uses 200 PEC samples inside each ZNE scale evaluation; CDR uses the recipe's training circuit count. These stochastic previews are approximate and vary between runs.
-
-Requires `pip install emrg[preview]`.
-
-## Project Structure
 ```
 EMRG/
 ├── src/emrg/
@@ -253,146 +188,25 @@ EMRG/
 ├── docs/
 │   ├── examples/        # Example circuits (Python + QASM)
 │   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
-├── benchmarks/          # Automated benchmark suite
+├── benchmarks/          # Automated benchmark suite plus historical data
 └── pyproject.toml       # Package configuration
 ```
 
-## Benchmarks
+## Design choices
 
-EMRG includes a reproducible benchmark harness for v0.5.1 calibration work.
-It writes machine-readable JSON under `benchmarks/results/` and scores runs
-separately, so default-policy changes can be compared against a fixed baseline
-instead of tuned by anecdote.
+- Deterministic by default.
+- Policy files, not arbitrary code.
+- Mitiq-native output instead of a wrapper runtime.
+- Qiskit input today.
+- Benchmark harness is local and reproducible.
+- Conservative about hardware claims.
 
-```powershell
-.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --quick --output benchmarks\results\quick.json
-.\.venv\Scripts\python.exe benchmarks\score_results.py benchmarks\results\quick.json
+## Limitations
 
-.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --policy benchmarks\policies\default-v050.json --output benchmarks\results\baseline-v050.json
-.\.venv\Scripts\python.exe benchmarks\score_results.py benchmarks\results\baseline-v050.json
-```
-
-Local v0.5.1 calibration snapshot, using the fixed internal corpus with
-`--seed 1234 --repeats 5 --include-speed --include-quality` on Python 3.12.10,
-Windows 11, Qiskit 2.3.0, Mitiq 0.48.1, NumPy 1.26.4:
-
-| Policy | Score | Quality passed/failed/skipped | Median error reduction | Median overhead |
-|---|---:|---|---:|---:|
-| `default-v050.json` | 0.7872 | 10 / 0 / 8 | 2.357x | 6.500 |
-| `default-v051.json` | 1.8455 | 10 / 0 / 8 | 4.779x | 5.000 |
-
-These are benchmark-harness results, not hardware-performance claims. Rerun the
-commands on your target environment before using the numbers for release notes
-or comparisons.
-
-See [`benchmarks/README.md`](benchmarks/README.md) for the benchmark philosophy,
-external QASM guidance, and candidate-policy comparison workflow.
-
-The numeric tables below are a historical reference snapshot collected by
-[`benchmarks/run_benchmark.py`](benchmarks/run_benchmark.py) on EMRG v0.3.0.
-Rerun the current benchmark harness before using these numbers for new release
-claims.
-
-> **Environment:** Python 3.12, Windows 11 | Qiskit 2.3.0, Mitiq 0.48.1
-
-### Tool Performance
-
-`generate_recipe()` uses pure Qiskit introspection (no simulation), so it completes in sub-millisecond time even for large circuits. Median of 100 runs:
-
-| Circuit | Qubits | Depth | Gates | Multi-Q | Het | Technique / Config | Time | Memory |
-|---|---|---|---|---|---|---|---|---|
-| Bell state | 2 | 3 | 2 | 1 | 0.00 | `LinearFactory` + fold_global | 0.09 ms | 9.4 KB |
-| Bell state (PEC) | 2 | 3 | 2 | 1 | 0.00 | PEC | 0.09 ms | 9.4 KB |
-| GHZ-5 | 5 | 6 | 5 | 4 | 0.50 | `LinearFactory` + fold_global | 0.14 ms | 15.2 KB |
-| GHZ-10 | 10 | 11 | 10 | 9 | 0.50 | `LinearFactory` + fold_global | 0.24 ms | 24.9 KB |
-| Random 10q, 3 layers | 10 | 7 | 45 | 15 | 0.83 | `LinearFactory` + fold_global | 0.39 ms | 21.2 KB |
-| VQE 10q, 4 layers | 10 | 20 | 76 | 36 | 1.50 | CDR (16 training) | 0.64 ms | 43.8 KB |
-| Hetero 4q, 8 layers | 4 | 17 | 42 | 10 | 1.00 | CDR (12 training) | 0.40 ms | 34.6 KB |
-| T-gate 4q | 4 | 7 | 12 | 3 | 0.50 | `LinearFactory` + fold_global | 0.15 ms | 16.7 KB |
-| Rz-rot 4q, 4 layers | 4 | 14 | 28 | 12 | 0.50 | CDR (12 training) | 0.29 ms | 29.3 KB |
-| Random 20q, 6 layers | 20 | 13 | 180 | 60 | 0.91 | CDR (16 training) | 1.06 ms | 49.0 KB |
-| Random 30q, 10 layers | 30 | 21 | 450 | 150 | 0.94 | CDR (16 training) | 2.41 ms | 116.3 KB |
-| Random 50q, 15 layers | 50 | 31 | 1125 | 375 | 0.96 | CDR (16 training) | 5.81 ms | 282.0 KB |
-
-In this historical snapshot, a 50-qubit, 1125-gate circuit was analyzed and
-produced a full mitigation recipe in under 6 ms. Several non-Clifford rotation
-circuits were routed to CDR under the older default policy.
-
-### ZNE Fidelity
-
-End-to-end ZNE on Cirq `DensityMatrixSimulator` with per-gate depolarizing noise, comparing ⟨Z⟩ on qubit 0:
-
-| Circuit | Qubits | Depth | Noise | Technique / Config | Ideal | Noisy | Mitigated | Error Reduction |
-|---|---|---|---|---|---|---|---|---|
-| X-flip, 2q | 2 | 3 | p=0.01 | `LinearFactory` + fold_global | -1.0000 | -0.9761 | -1.0003 | **77x** |
-| X-flip, 3q | 3 | 4 | p=0.01 | `LinearFactory` + fold_global | -1.0000 | -0.9761 | -1.0003 | **77x** |
-| X-flip, 2q | 2 | 3 | p=0.05 | `LinearFactory` + fold_global | -1.0000 | -0.8836 | -0.9906 | **12x** |
-| X-flip, 3q | 3 | 4 | p=0.05 | `LinearFactory` + fold_global | -1.0000 | -0.8836 | -0.9906 | **12x** |
-| VQE 4q, 2 layers | 4 | 8 | p=0.01 | `LinearFactory` + fold_global | 0.0850 | 0.0775 | 0.0794 | **1.4x** |
-| VQE 4q, 4 layers | 4 | 14 | p=0.01 | `LinearFactory` + fold_global | -0.1915 | -0.1766 | -0.1850 | **2.3x** |
-| VQE 4q, 2 layers | 4 | 8 | p=0.05 | `LinearFactory` + fold_global | 0.0850 | 0.0523 | 0.0586 | **1.2x** |
-
-### PEC vs ZNE: Head-to-Head
-
-Same circuits, same noise, both techniques. PEC uses 1000 samples for benchmark accuracy; its results have inherent variance from stochastic sampling. ZNE is deterministic.
-
-**Single-qubit observable ⟨Z⟩:**
-
-| Circuit | Noise | ZNE Error | ZNE Reduction | PEC Error | PEC Reduction | Better |
-|---|---|---|---|---|---|---|
-| VQE 4q, 2 layers | p=0.01 | 0.0055 | 1.4x | 0.0007 | **10.4x** | PEC |
-| VQE 4q, 2 layers | p=0.03 | 0.0162 | 1.3x | 0.0138 | **1.5x** | PEC |
-| VQE 4q, 2 layers | p=0.05 | 0.0264 | 1.2x | 0.0176 | **1.9x** | PEC |
-| X-flip, 3q | p=0.03 | 0.0024 | **28.9x** | 0.0245 | 2.9x | ZNE |
-
-**Multi-qubit observable ⟨ZZ⟩:**
-
-| Circuit | Noise | ZNE Error | ZNE Reduction | PEC Error | PEC Reduction | Better |
-|---|---|---|---|---|---|---|
-| VQE 4q, 2 layers | p=0.01 | 0.0021 | **5.7x** | 0.0064 | 1.9x | ZNE |
-| VQE 4q, 2 layers | p=0.03 | 0.0102 | **3.4x** | 0.0173 | 2.0x | ZNE |
-| VQE 4q, 2 layers | p=0.05 | 0.0216 | 2.5x | 0.0147 | **3.6x** | PEC |
-
-ZNE excels on structured circuits where noise scales predictably with folding (X-flip: 28.9x). PEC excels on irregular circuits at higher noise, where ZNE's extrapolation assumptions break down. On ⟨ZZ⟩, PEC overtakes ZNE as noise increases: 3.6x vs 2.5x at p=0.05. EMRG recommends PEC for shallow, noisy circuits with an available noise model, and ZNE otherwise.
-
-### Layerwise Folding
-
-`fold_gates_at_random` targets the noisiest gates in circuits with uneven layer structure, instead of folding uniformly. Benchmarks show mixed results; the heuristic thresholds are being refined.
-
-| Circuit | Qubits | Depth | Het | Noise | Global | Layerwise | Winner |
-|---|---|---|---|---|---|---|---|
-| VQE 10q, 3 reps | 10 | 13 | 2.50 | p=0.01 | 0.9x | **12.6x** | layerwise |
-| VQE 10q, 3 reps | 10 | 13 | 2.50 | p=0.03 | 1.1x | 1.1x | -- |
-| QAOA 10q | 10 | 14 | 2.50 | p=0.01 | **4.2x** | 0.2x | global |
-| QAOA 10q | 10 | 14 | 2.50 | p=0.03 | **5.9x** | 0.7x | global |
-| Extreme 10q | 10 | 13 | 2.50 | p=0.01 | 0.5x | 0.4x | -- |
-| Extreme 10q | 10 | 13 | 2.50 | p=0.03 | 0.5x | 0.1x | global |
-
-This historical snapshot showed mixed results for random gate folding. v0.5.1
-uses policy-calibrated ZNE profiles, so the table should not be read as a
-current universal rule for `fold_global` or `fold_gates_at_random`.
-
-### CDR vs ZNE
-
-CDR replaces non-Clifford gates with Clifford substitutes to create classically simulable training circuits, then fits a regression model to correct the noisy result. Compared to ZNE on circuits with non-Clifford gates:
-
-| Circuit | Noise | ZNE Error | ZNE Reduction | CDR Error | CDR Reduction | Better |
-|---|---|---|---|---|---|---|
-| Rz-rot 4q | p=0.01 | 0.0253 | 2.8x | ~0.0000 | **>1000x** | CDR |
-| Rz-rot 4q | p=0.03 | 0.0866 | 2.3x | ~0.0000 | **>1000x** | CDR |
-| VQE 4q, 2 layers | p=0.01 | 0.0055 | 1.4x | 0.0036 | **2.1x** | CDR |
-| VQE 4q, 2 layers | p=0.03 | 0.0162 | 1.3x | 0.0108 | **1.9x** | CDR |
-
-This historical snapshot favored CDR on the listed rotation-heavy and VQE
-circuits. In v0.5.1, EMRG auto-selects CDR when the non-Clifford gate fraction
-exceeds 30% and depth is between 12 and 40; otherwise the policy may select ZNE
-if the benchmark-calibrated profile is a better fit.
-
-### Reproduce
-```
-pip install -e ".[dev]" qiskit-aer
-python benchmarks/run_benchmark.py
-```
+- Qiskit input is the main path for now.
+- Generated code needs a backend executor.
+- Preview is simulation, not hardware validation of course.
+- PEC, CDR, and composite recipes can have stochastic or backend-specific costs.
 
 ## Roadmap
 
@@ -406,7 +220,7 @@ python benchmarks/run_benchmark.py
 - [x] Public Python API (`generate_recipe()`)
 - [x] Example circuits (Python + QASM) and documentation
 
-### Phase 2 -- Multi-technique support (current)
+### Phase 2 -- Multi-technique support (complete)
 
 - [x] Probabilistic Error Cancellation (PEC) support
 - [x] Multi-technique selection (ZNE vs PEC)
@@ -418,13 +232,12 @@ python benchmarks/run_benchmark.py
 - [x] 486 tests, coverage checked in CI/local validation, zero lint warnings
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
-- [ ] Real hardware benchmarks (IBM Quantum devices)
+- [x] Configurable heuristics via YAML/JSON
 
-### Phase 3 -- Multi-framework support
+### Phase 3 -- Multi-framework support (in progress)
 
 - [ ] Cirq, PennyLane, and Amazon Braket input support
 - [ ] Noise model import from Qiskit Aer / real device calibration data
-- [x] Configurable heuristics via YAML/JSON
 - [ ] Jupyter widget for interactive recipe exploration
 - [ ] Web/Colab interface
 
@@ -434,6 +247,7 @@ python benchmarks/run_benchmark.py
 - [ ] Circuit similarity search against known-good configurations
 - [ ] Auto-tuning via internal `--preview` iterations before output
 - [ ] Cost-aware optimization within user-specified shot budgets
+- [ ] Real hardware benchmarks (IBM Quantum devices)
 
 ### Phase 5 -- Ecosystem integration
 
@@ -452,12 +266,13 @@ python benchmarks/run_benchmark.py
 
 ## Contributing
 
-Open an issue or PR on [GitHub](https://github.com/FedorShind/EMRG).
+Open an issue or PR on [GitHub](https://github.com/FedorShind/EMRG). Always welcome!
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) - go build something quantum!
 
 ## Acknowledgments
 
-Built on [Mitiq](https://mitiq.readthedocs.io/) by [Unitary Foundation](https://unitary.foundation/).
+Built on [Mitiq](https://mitiq.readthedocs.io/) by
+[Unitary Foundation](https://unitary.foundation/).
