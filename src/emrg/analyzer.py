@@ -1,8 +1,8 @@
-"""Circuit Analyzer -- extract features from a Qiskit QuantumCircuit.
+"""Circuit Analyzer -- extract features from supported circuit frontends.
 
 This module is the foundation of the EMRG pipeline. It inspects a
-QuantumCircuit and returns a :class:`CircuitFeatures` dataclass that
-downstream modules (heuristics, codegen) consume.
+Qiskit or Cirq circuit and returns a :class:`CircuitFeatures` dataclass
+that downstream modules (heuristics, codegen) consume.
 
 Typical usage::
 
@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from qiskit import QuantumCircuit
+
+from emrg.frontends import Frontend, detect_frontend
 
 __all__ = [
     "CircuitFeatures",
@@ -234,7 +236,7 @@ class CircuitFeatures:
 # ---------------------------------------------------------------------------
 
 
-def _validate_circuit(qc: QuantumCircuit) -> list[str]:
+def _validate_qiskit_circuit(qc: QuantumCircuit) -> list[str]:
     """Validate the circuit and return a list of warning messages (may be empty).
 
     Checks:
@@ -354,7 +356,7 @@ def _is_clifford_angle(angle: float) -> bool:
 _NON_GATE_OP_NAMES: frozenset[str] = frozenset({"measure", "barrier", "delay", "reset"})
 
 
-def _walk_dag(qc: QuantumCircuit) -> tuple[float, int]:
+def _walk_qiskit_dag(qc: QuantumCircuit) -> tuple[float, int]:
     """Single DAG pass returning ``(layer_heterogeneity, non_clifford_count)``.
 
     Building the DAG dominates ``analyze_circuit`` for large circuits, so
@@ -420,57 +422,180 @@ def _walk_dag(qc: QuantumCircuit) -> tuple[float, int]:
 
 
 # ---------------------------------------------------------------------------
+# Cirq-derived features
+# ---------------------------------------------------------------------------
+
+
+def _is_cirq_measurement_or_reset(op: Any) -> bool:
+    """Return True for Cirq operations that should not count as gates."""
+    import cirq
+
+    gate = getattr(op, "gate", None)
+    if isinstance(gate, cirq.MeasurementGate):
+        return True
+    reset_channel = getattr(cirq, "ResetChannel", None)
+    return reset_channel is not None and isinstance(gate, reset_channel)
+
+
+def _cirq_exponent(gate: Any) -> Any:
+    """Return a Cirq gate exponent when present."""
+    return getattr(gate, "exponent", None)
+
+
+def _as_float(value: Any) -> float | None:
+    """Return *value* as float when it is numeric and resolved."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_half_turn_clifford(exponent: float) -> bool:
+    """Return True when a Cirq half-turn exponent is Clifford."""
+    units = exponent / 0.5
+    return abs(units - round(units)) < 1e-8
+
+
+def _cirq_gate_name(op: Any) -> str:
+    """Return a stable, Qiskit-like gate-count name for common Cirq gates."""
+    import cirq
+
+    if isinstance(op, cirq.CircuitOperation):
+        return "circuit_operation"
+
+    gate = getattr(op, "gate", None)
+    if gate is None:
+        return type(op).__name__.lower()
+
+    exponent = _as_float(_cirq_exponent(gate))
+    if isinstance(gate, cirq.HPowGate):
+        return "h"
+    if isinstance(gate, cirq.CNotPowGate):
+        return "cx"
+    if isinstance(gate, cirq.CZPowGate):
+        return "cz"
+    if isinstance(gate, cirq.SwapPowGate):
+        return "swap"
+    if isinstance(gate, cirq.XPowGate):
+        if exponent == 1:
+            return "x"
+        return "rx"
+    if isinstance(gate, cirq.YPowGate):
+        if exponent == 1:
+            return "y"
+        return "ry"
+    if isinstance(gate, cirq.ZPowGate):
+        if exponent == 1:
+            return "z"
+        if exponent == 0.5:
+            return "s"
+        if exponent == -0.5:
+            return "sdg"
+        if exponent == 0.25:
+            return "t"
+        if exponent == -0.25:
+            return "tdg"
+        return "rz"
+
+    return type(gate).__name__.lower()
+
+
+def _is_cirq_non_clifford(op: Any) -> bool:
+    """Conservatively classify a Cirq operation as non-Clifford."""
+    import cirq
+
+    if _is_cirq_measurement_or_reset(op):
+        return False
+    if isinstance(op, cirq.CircuitOperation):
+        return True
+
+    gate = getattr(op, "gate", None)
+    if gate is None:
+        return True
+
+    exponent = _cirq_exponent(gate)
+    if exponent is not None:
+        exponent_float = _as_float(exponent)
+        if exponent_float is None:
+            return True
+        return not _is_half_turn_clifford(exponent_float)
+
+    if isinstance(gate, cirq.IdentityGate):
+        return False
+
+    return True
+
+
+def _cirq_parameter_count(circuit: Any, operations: list[Any]) -> int:
+    """Count unique Cirq symbols, falling back to parameterized operations."""
+    import cirq
+
+    try:
+        return len(cirq.parameter_names(circuit))
+    except Exception:
+        return sum(1 for op in operations if cirq.is_parameterized(op))
+
+
+def _cirq_layer_heterogeneity(circuit: Any) -> float:
+    """Return Cirq multi-qubit operation heterogeneity across moments."""
+    mq_counts: list[int] = []
+    for moment in circuit:
+        mq_in_moment = sum(
+            1
+            for op in moment.operations
+            if not _is_cirq_measurement_or_reset(op) and len(op.qubits) > 1
+        )
+        if mq_in_moment > 0:
+            mq_counts.append(mq_in_moment)
+
+    if len(mq_counts) < 2:
+        return 0.0
+    return max(mq_counts) / (min(mq_counts) + 1)
+
+
+def _validate_cirq_circuit(circuit: Any, operations: list[Any]) -> list[str]:
+    """Validate a Cirq circuit and return warning messages."""
+    gate_ops = [op for op in operations if not _is_cirq_measurement_or_reset(op)]
+    if not gate_ops:
+        raise ValueError(
+            "Circuit has no gate operations. "
+            "Provide a circuit with at least one quantum gate."
+        )
+
+    warns: list[str] = []
+    if not any(_is_cirq_measurement_or_reset(op) for op in operations):
+        warns.append(
+            "Circuit has no measurements. Error mitigation requires "
+            "measurement results -- consider adding measurements."
+        )
+
+    num_parameters = _cirq_parameter_count(circuit, operations)
+    if num_parameters > 0:
+        warns.append(
+            f"Circuit has {num_parameters} unbound parameter(s). "
+            "Parameters must be resolved before execution. "
+            "EMRG will analyze the circuit structure, but the generated "
+            "code cannot run until all parameters are resolved."
+        )
+    return warns
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def analyze_circuit(
+def _analyze_qiskit_circuit(
     qc: QuantumCircuit,
     *,
     multi_qubit_error_rate: float = DEFAULT_MULTI_QUBIT_ERROR_RATE,
     single_qubit_error_rate: float = DEFAULT_SINGLE_QUBIT_ERROR_RATE,
     noise_model_available: bool = False,
 ) -> CircuitFeatures:
-    """Analyze a Qiskit ``QuantumCircuit`` and extract mitigation-relevant features.
-
-    Parameters
-    ----------
-    qc:
-        The circuit to analyze.
-    multi_qubit_error_rate:
-        Proxy error rate for multi-qubit gates (default 0.01).
-    single_qubit_error_rate:
-        Proxy error rate for single-qubit gates (default 0.001).
-    noise_model_available:
-        Whether a noise model is available for techniques like PEC
-        (default ``False``).  Set to ``True`` when a depolarizing or
-        tomographic noise model can be supplied.
-
-    Returns
-    -------
-    CircuitFeatures
-        Immutable dataclass with extracted metrics.
-
-    Raises
-    ------
-    TypeError
-        If *qc* is not a ``QuantumCircuit``.
-    ValueError
-        If the circuit has zero gate operations.
-
-    Examples
-    --------
-    >>> from qiskit import QuantumCircuit
-    >>> qc = QuantumCircuit(2, 2); _ = qc.h(0); _ = qc.cx(0, 1)
-    >>> qc.measure([0, 1], [0, 1])
-    >>> features = analyze_circuit(qc)
-    >>> features.num_qubits
-    2
-    >>> features.multi_qubit_gate_count
-    1
-    """
-    # --- validate -----------------------------------------------------------
-    warn_msgs = _validate_circuit(qc)
+    """Analyze a Qiskit ``QuantumCircuit`` with the original native path."""
+    warn_msgs = _validate_qiskit_circuit(qc)
     for msg in warn_msgs:
         warnings.warn(msg, UserWarning, stacklevel=2)
 
@@ -498,7 +623,7 @@ def analyze_circuit(
     )
 
     pec_overhead = _estimate_pec_overhead(noise_factor, multi_qubit_gate_count)
-    layer_het, non_clifford = _walk_dag(qc)
+    layer_het, non_clifford = _walk_qiskit_dag(qc)
     nc_fraction = non_clifford / total_gate_count if total_gate_count > 0 else 0.0
 
     return CircuitFeatures(
@@ -518,3 +643,126 @@ def analyze_circuit(
         non_clifford_count=non_clifford,
         non_clifford_fraction=round(nc_fraction, 6),
     )
+
+
+def _analyze_cirq_circuit(
+    circuit: Any,
+    *,
+    multi_qubit_error_rate: float = DEFAULT_MULTI_QUBIT_ERROR_RATE,
+    single_qubit_error_rate: float = DEFAULT_SINGLE_QUBIT_ERROR_RATE,
+    noise_model_available: bool = False,
+) -> CircuitFeatures:
+    """Analyze a Cirq ``Circuit`` into EMRG's shared feature model."""
+    operations = list(circuit.all_operations())
+    warn_msgs = _validate_cirq_circuit(circuit, operations)
+    for msg in warn_msgs:
+        warnings.warn(msg, UserWarning, stacklevel=2)
+
+    gate_ops = [op for op in operations if not _is_cirq_measurement_or_reset(op)]
+    gate_counts: dict[str, int] = {}
+    for op in gate_ops:
+        name = _cirq_gate_name(op)
+        gate_counts[name] = gate_counts.get(name, 0) + 1
+
+    total_gate_count = len(gate_ops)
+    multi_qubit_gate_count = sum(1 for op in gate_ops if len(op.qubits) > 1)
+    single_qubit_gate_count = sum(1 for op in gate_ops if len(op.qubits) == 1)
+    num_parameters = _cirq_parameter_count(circuit, operations)
+
+    noise_factor = _estimate_noise(
+        multi_qubit_gate_count,
+        single_qubit_gate_count,
+        multi_qubit_error_rate=multi_qubit_error_rate,
+        single_qubit_error_rate=single_qubit_error_rate,
+    )
+
+    pec_overhead = _estimate_pec_overhead(noise_factor, multi_qubit_gate_count)
+    layer_het = _cirq_layer_heterogeneity(circuit)
+    non_clifford = sum(1 for op in gate_ops if _is_cirq_non_clifford(op))
+    nc_fraction = non_clifford / total_gate_count if total_gate_count > 0 else 0.0
+
+    return CircuitFeatures(
+        num_qubits=len(circuit.all_qubits()),
+        depth=len(circuit),
+        gate_counts=_freeze_dict(gate_counts),
+        total_gate_count=total_gate_count,
+        multi_qubit_gate_count=multi_qubit_gate_count,
+        single_qubit_gate_count=single_qubit_gate_count,
+        num_parameters=num_parameters,
+        has_measurements=any(_is_cirq_measurement_or_reset(op) for op in operations),
+        estimated_noise_factor=round(noise_factor, 6),
+        noise_category=_classify_noise(noise_factor),
+        noise_model_available=noise_model_available,
+        pec_overhead_estimate=round(pec_overhead, 6),
+        layer_heterogeneity=round(layer_het, 4),
+        non_clifford_count=non_clifford,
+        non_clifford_fraction=round(nc_fraction, 6),
+    )
+
+
+def analyze_circuit(
+    circuit: object,
+    *,
+    frontend: str | Frontend | None = None,
+    multi_qubit_error_rate: float = DEFAULT_MULTI_QUBIT_ERROR_RATE,
+    single_qubit_error_rate: float = DEFAULT_SINGLE_QUBIT_ERROR_RATE,
+    noise_model_available: bool = False,
+) -> CircuitFeatures:
+    """Analyze a supported circuit and extract mitigation-relevant features.
+
+    Parameters
+    ----------
+    circuit:
+        A Qiskit ``QuantumCircuit`` or Cirq ``Circuit`` to analyze.
+    frontend:
+        Optional explicit frontend: ``"qiskit"`` or ``"cirq"``. When omitted,
+        EMRG auto-detects Qiskit first, then Cirq.
+    multi_qubit_error_rate:
+        Proxy error rate for multi-qubit gates (default 0.01).
+    single_qubit_error_rate:
+        Proxy error rate for single-qubit gates (default 0.001).
+    noise_model_available:
+        Whether a noise model is available for techniques like PEC
+        (default ``False``).  Set to ``True`` when a depolarizing or
+        tomographic noise model can be supplied.
+
+    Returns
+    -------
+    CircuitFeatures
+        Immutable dataclass with extracted metrics.
+
+    Raises
+    ------
+    TypeError
+        If *circuit* is not a supported circuit type, or if an explicit
+        frontend does not match the circuit object.
+    ValueError
+        If the circuit has zero gate operations.
+
+    Examples
+    --------
+    >>> from qiskit import QuantumCircuit
+    >>> qc = QuantumCircuit(2, 2); _ = qc.h(0); _ = qc.cx(0, 1)
+    >>> qc.measure([0, 1], [0, 1])
+    >>> features = analyze_circuit(qc)
+    >>> features.num_qubits
+    2
+    >>> features.multi_qubit_gate_count
+    1
+    """
+    active_frontend = detect_frontend(circuit, frontend)
+    if active_frontend is Frontend.QISKIT:
+        return _analyze_qiskit_circuit(
+            circuit,
+            multi_qubit_error_rate=multi_qubit_error_rate,
+            single_qubit_error_rate=single_qubit_error_rate,
+            noise_model_available=noise_model_available,
+        )
+    if active_frontend is Frontend.CIRQ:
+        return _analyze_cirq_circuit(
+            circuit,
+            multi_qubit_error_rate=multi_qubit_error_rate,
+            single_qubit_error_rate=single_qubit_error_rate,
+            noise_model_available=noise_model_available,
+        )
+    raise TypeError(f"Unsupported frontend: {active_frontend!r}.")

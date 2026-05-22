@@ -78,7 +78,8 @@ def detect_frontend(
     if isinstance(circuit, str):
         raise TypeError(
             "Raw string circuit input is not supported in this phase. "
-            "Use the QASM CLI for QASM files."
+            "Use the QASM CLI for QASM files. Expected a qiskit.QuantumCircuit "
+            "or cirq.Circuit object."
         )
 
     if frontend is not None:
