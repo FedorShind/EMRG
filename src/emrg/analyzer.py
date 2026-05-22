@@ -470,6 +470,8 @@ def _cirq_gate_name(op: Any) -> str:
         return type(op).__name__.lower()
 
     exponent = _as_float(_cirq_exponent(gate))
+    if isinstance(gate, cirq.IdentityGate):
+        return "i"
     if isinstance(gate, cirq.HPowGate):
         return "h"
     if isinstance(gate, cirq.CNotPowGate):

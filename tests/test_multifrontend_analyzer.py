@@ -305,6 +305,38 @@ class TestCirqAnalysis:
         assert features.total_gate_count == 1
         assert features.non_clifford_count == 1
 
+    def test_cirq_gate_names_cover_common_pow_gate_variants(self) -> None:
+        class CustomGate(cirq.Gate):
+            def _num_qubits_(self) -> int:
+                return 1
+
+        q0, q1 = cirq.LineQubit.range(2)
+        circuit = cirq.Circuit(
+            cirq.SWAP(q0, q1),
+            cirq.X(q0),
+            cirq.Y(q0),
+            cirq.Z(q0),
+            cirq.ZPowGate(exponent=-0.5).on(q0),
+            cirq.ZPowGate(exponent=-0.25).on(q0),
+            cirq.I(q0),
+            CustomGate().on(q0),
+            cirq.measure(q0, q1),
+        )
+
+        features = analyze_circuit(circuit)
+
+        assert dict(features.gate_counts) == {
+            "swap": 1,
+            "x": 1,
+            "y": 1,
+            "z": 1,
+            "sdg": 1,
+            "tdg": 1,
+            "i": 1,
+            "customgate": 1,
+        }
+        assert features.non_clifford_count == 2
+
     def test_raw_strings_are_rejected(self) -> None:
         with pytest.raises(
             TypeError, match="Raw string circuit input is not supported"

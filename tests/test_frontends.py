@@ -72,3 +72,8 @@ def test_rejects_unsupported_object() -> None:
 def test_rejects_invalid_frontend_name() -> None:
     with pytest.raises(ValueError, match="Unsupported frontend"):
         detect_frontend(_qiskit_bell(), frontend="braket")
+
+
+def test_rejects_invalid_frontend_type() -> None:
+    with pytest.raises(TypeError, match="frontend must be"):
+        detect_frontend(_qiskit_bell(), frontend=object())  # type: ignore[arg-type]

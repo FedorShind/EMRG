@@ -43,3 +43,27 @@ def test_generate_recipe_preview_accepts_tiny_cirq_circuit() -> None:
     assert result.preview.warning is None or "failed" not in result.preview.warning
     assert result.preview.ideal_value is not None
     assert "Preview" in str(result)
+
+
+def test_cirq_preview_respects_gate_budget() -> None:
+    qubits = cirq.LineQubit.range(8)
+    circuit = cirq.Circuit(cirq.X(qubits[0]) for _ in range(61))
+    circuit.append(cirq.measure(*qubits))
+    recipe = generate_recipe(circuit).recipe
+
+    result = run_preview(circuit, recipe)
+
+    assert result.warning is not None
+    assert "exceeds simulation budget" in result.warning
+    assert result.ideal_value is None
+
+
+def test_cirq_preview_returns_clear_warning_on_invalid_observable() -> None:
+    circuit = _cirq_bell()
+    recipe = generate_recipe(circuit).recipe
+
+    result = run_preview(circuit, recipe, observable="XY")
+
+    assert result.warning is not None
+    assert "Simulation failed" in result.warning
+    assert "Invalid observable" in result.warning
