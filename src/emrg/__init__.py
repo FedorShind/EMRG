@@ -23,11 +23,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from emrg._version import __version__
 from emrg.analyzer import CircuitFeatures, analyze_circuit
 from emrg.codegen import generate_code
+from emrg.frontends import Frontend, detect_frontend
 from emrg.heuristics import MitigationRecipe, recommend
 from emrg.policy import (
     DEFAULT_POLICY,
@@ -38,13 +38,12 @@ from emrg.policy import (
 )
 from emrg.preview import PreviewResult, format_preview, run_preview
 
-if TYPE_CHECKING:
-    from qiskit import QuantumCircuit
-
 __all__ = [
     "__version__",
     "GeneratedRecipe",
     "generate_recipe",
+    "Frontend",
+    "detect_frontend",
     "analyze_circuit",
     "CircuitFeatures",
     "recommend",
@@ -99,8 +98,9 @@ class GeneratedRecipe:
 
 
 def generate_recipe(
-    qc: QuantumCircuit,
+    circuit: object,
     *,
+    frontend: str | Frontend | None = None,
     explain: bool = False,
     circuit_name: str = "circuit",
     technique: str | None = None,
@@ -117,8 +117,11 @@ def generate_recipe(
 
     Parameters
     ----------
-    qc:
-        A Qiskit ``QuantumCircuit`` to mitigate.
+    circuit:
+        A Qiskit ``QuantumCircuit`` or Cirq ``Circuit`` to mitigate.
+    frontend:
+        Optional explicit frontend: ``"qiskit"`` or ``"cirq"``. When omitted,
+        EMRG auto-detects Qiskit first, then Cirq.
     explain:
         If ``True``, include full rationale and inline comments in the
         generated code.
@@ -157,7 +160,8 @@ def generate_recipe(
     Raises
     ------
     TypeError
-        If *qc* is not a ``QuantumCircuit``.
+        If *circuit* is not a supported circuit object, or if an explicit
+        frontend does not match the object.
     ValueError
         If the circuit has zero gate operations.
 
@@ -174,7 +178,11 @@ def generate_recipe(
     True
     """
     active_policy = load_policy(policy) if isinstance(policy, (str, Path)) else policy
-    features = analyze_circuit(qc, noise_model_available=noise_model_available)
+    features = analyze_circuit(
+        circuit,
+        frontend=frontend,
+        noise_model_available=noise_model_available,
+    )
     recipe = recommend(features, technique=technique, policy=active_policy)
     code = generate_code(
         recipe,
@@ -188,7 +196,7 @@ def generate_recipe(
         from emrg.preview import run_preview
 
         preview_result = run_preview(
-            qc, recipe, noise_level=noise_level, observable=observable
+            circuit, recipe, noise_level=noise_level, observable=observable
         )
 
     return GeneratedRecipe(
