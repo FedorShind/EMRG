@@ -40,10 +40,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
-    from qiskit import QuantumCircuit
 
     from emrg.analyzer import CircuitFeatures
     from emrg.heuristics import MitigationRecipe
+
+from emrg.frontends import Frontend, detect_frontend
 
 logger = logging.getLogger("emrg.preview")
 
@@ -209,6 +210,36 @@ def _make_noisy_cirq_circuit(circuit, noise_level: float):
     return noisy
 
 
+def _is_cirq_measurement_or_reset(op) -> bool:
+    """Return True for Cirq operations that should be stripped before preview."""
+    import cirq
+
+    gate = getattr(op, "gate", None)
+    if isinstance(gate, cirq.MeasurementGate):
+        return True
+    reset_channel = getattr(cirq, "ResetChannel", None)
+    return reset_channel is not None and isinstance(gate, reset_channel)
+
+
+def _cirq_gate_count(circuit) -> int:
+    """Count non-measurement operations in a Cirq circuit."""
+    return sum(
+        1 for op in circuit.all_operations() if not _is_cirq_measurement_or_reset(op)
+    )
+
+
+def _strip_cirq_measurements(circuit):
+    """Return a Cirq circuit without measurement or reset operations."""
+    import cirq
+
+    return cirq.Circuit(
+        op
+        for moment in circuit
+        for op in moment.operations
+        if not _is_cirq_measurement_or_reset(op)
+    )
+
+
 def _compute_expectation(rho, observable) -> float:
     """Tr(rho @ observable)."""
     import numpy as np_
@@ -370,7 +401,7 @@ def _run_cdr(
 
 
 def run_preview(
-    qc: QuantumCircuit,
+    circuit: object,
     recipe: MitigationRecipe,
     *,
     noise_level: float = 0.01,
@@ -380,8 +411,8 @@ def run_preview(
 
     Parameters
     ----------
-    qc:
-        A Qiskit ``QuantumCircuit``.
+    circuit:
+        A Qiskit ``QuantumCircuit`` or Cirq ``Circuit``.
     recipe:
         The ``MitigationRecipe`` returned by ``recommend()``.
     noise_level:
@@ -399,7 +430,11 @@ def run_preview(
     """
     _check_cirq_available()
 
-    n_qubits = qc.num_qubits
+    active_frontend = detect_frontend(circuit)
+    if active_frontend is Frontend.QISKIT:
+        n_qubits = circuit.num_qubits
+    else:
+        n_qubits = len(circuit.all_qubits())
     technique = recipe.technique.upper()
 
     # Guard: density matrix simulation cost is roughly
@@ -426,11 +461,14 @@ def run_preview(
 
     gate_limit = _GATE_LIMITS.get(n_qubits)
     if gate_limit is not None:
-        total_gates = sum(
-            count
-            for name, count in qc.count_ops().items()
-            if name not in ("measure", "barrier", "delay", "reset")
-        )
+        if active_frontend is Frontend.QISKIT:
+            total_gates = sum(
+                count
+                for name, count in circuit.count_ops().items()
+                if name not in ("measure", "barrier", "delay", "reset")
+            )
+        else:
+            total_gates = _cirq_gate_count(circuit)
         if total_gates > gate_limit:
             return PreviewResult(
                 ideal_value=None,
@@ -460,16 +498,19 @@ def run_preview(
         # the ImportError be caught by the except block below so the
         # caller gets a clean PreviewResult with a warning instead of
         # a crash at module load time.
-        from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
+        if active_frontend is Frontend.QISKIT:
+            from mitiq.interface.mitiq_qiskit.conversions import from_qiskit
 
-        # Strip measurements -- Cirq density matrix sim doesn't need them.
-        gate_only = qc.copy()
-        gate_only.remove_final_measurements()
-        cirq_circuit = from_qiskit(gate_only)
+            # Strip measurements -- Cirq density matrix sim doesn't need them.
+            gate_only = circuit.copy()
+            gate_only.remove_final_measurements()
+            cirq_circuit = from_qiskit(gate_only)
+        else:
+            cirq_circuit = _strip_cirq_measurements(circuit)
 
         # Use Cirq circuit's actual qubit count for the observable matrix.
         # Cirq may drop idle qubits during conversion, so this can differ
-        # from qc.num_qubits.
+        # from the input circuit's qubit count.
         cirq_n_qubits = len(sorted(cirq_circuit.all_qubits()))
         obs_matrix = _parse_observable(observable, cirq_n_qubits)
 
