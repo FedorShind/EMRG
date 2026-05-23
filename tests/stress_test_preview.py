@@ -1,6 +1,9 @@
-"""Brutal stress test for EMRG v0.2.9 preview mode.
+"""Manual stress test for EMRG preview mode.
 
 Run with: python tests/stress_test_preview.py
+
+This script is intentionally not collected by pytest because some boundary
+preview simulations are slow and hardware-sensitive.
 """
 # ruff: noqa: E402
 
@@ -477,17 +480,24 @@ def test_f2():
 
 
 def test_f3():
-    """10-qubit preview timing."""
+    """10-qubit preview boundary -- should simulate instead of skip."""
     qc = QuantumCircuit(10)
     for i in range(9):
         qc.cx(i, i + 1)
     qc.measure_all()
     t0 = time.time()
-    generate_recipe(qc, preview=True)
+    result = generate_recipe(qc, preview=True)
     elapsed = time.time() - t0
-    # 10q density matrix sim is inherently slow (~25-35s).
-    ok = elapsed < 45
-    record(CAT, "F3 10q preview", ok, f"{elapsed:.2f}s")
+    # 10q density matrix simulation is intentionally slow and varies by
+    # machine; the behavioral contract is that the boundary still simulates.
+    warning = result.preview.warning if result.preview is not None else None
+    ok = (
+        result.preview is not None
+        and result.preview.ideal_value is not None
+        and (warning is None or "skip" not in warning.lower())
+    )
+    note = f"{elapsed:.2f}s" + (f", warning={warning[:50]}" if warning else "")
+    record(CAT, "F3 10q preview boundary", ok, note)
 
 
 def test_f4():
