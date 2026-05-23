@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
 import emrg.analyzer as analyzer_module
@@ -13,6 +16,7 @@ from emrg.heuristics import recommend
 from emrg.preview import PreviewResult, run_preview
 
 cirq = pytest.importorskip("cirq")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeBraketCircuit:
@@ -149,6 +153,23 @@ def test_generate_recipe_preview_skips_converted_optional_frontend(
     assert result.preview.warning is not None
     assert "Preview skipped" in result.preview.warning
     assert "braket" in result.preview.warning
+
+
+def test_optional_frontend_extras_are_declared_without_base_dependencies() -> None:
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
+    dependencies = pyproject["project"]["dependencies"]
+    extras = pyproject["project"]["optional-dependencies"]
+
+    assert all(
+        package not in dependency.lower()
+        for dependency in dependencies
+        for package in ("braket", "pennylane", "pyquil", "qibo")
+    )
+    assert extras["braket"] == ["mitiq[braket]>=0.48"]
+    assert extras["pennylane"] == ["mitiq[pennylane]>=0.48"]
+    assert extras["pyquil"] == ["mitiq[pyquil]>=0.48"]
+    assert extras["qibo"] == ["mitiq[qibo]>=0.48"]
+    assert extras["frontends"] == ["mitiq[braket,pennylane,pyquil,qibo]>=0.48"]
 
 
 def test_installed_braket_frontend_detects_and_analyzes() -> None:
