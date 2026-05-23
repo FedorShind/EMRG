@@ -46,7 +46,7 @@ def test_generate_recipe_accepts_explicit_cirq_frontend() -> None:
 
 
 def test_generate_recipe_rejects_wrong_explicit_frontend() -> None:
-    with pytest.raises(TypeError, match="Expected a qiskit.QuantumCircuit"):
+    with pytest.raises(TypeError, match="frontend='qiskit'.*got Circuit"):
         generate_recipe(_cirq_bell(), frontend="qiskit")
 
 

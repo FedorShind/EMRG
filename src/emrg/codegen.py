@@ -37,6 +37,25 @@ __all__ = ["generate_code"]
 # ---------------------------------------------------------------------------
 
 
+def _analysis_warnings(
+    recipe: MitigationRecipe,
+    features: CircuitFeatures,
+) -> tuple[str, ...]:
+    """Return generated-code warnings tied to the analysis basis."""
+    if features.analysis_basis != "cirq-normalized":
+        return ()
+
+    warnings = [
+        "Recipe selected from Cirq-normalized features converted "
+        f"from {features.frontend}; counts may differ from native SDK counts."
+    ]
+    if recipe.technique == "cdr":
+        warnings.append(
+            "CDR simulator adapter may need frontend-specific configuration."
+        )
+    return tuple(warnings)
+
+
 def _render_header(
     recipe: MitigationRecipe,
     features: CircuitFeatures,
@@ -73,10 +92,11 @@ def _render_header(
         ),
     ]
 
-    if recipe.warnings:
+    warnings = (*recipe.warnings, *_analysis_warnings(recipe, features))
+    if warnings:
         lines.append("#")
         lines.append("# Warnings:")
-        for warning_line in recipe.warnings:
+        for warning_line in warnings:
             lines.append(f"#   - {warning_line}")
 
     if explain and recipe.rationale:

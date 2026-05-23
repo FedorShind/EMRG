@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import pytest
 from qiskit import QuantumCircuit
@@ -218,6 +219,50 @@ class TestHeader:
         code = generate_code(recipe, shallow_features)
         assert "# Warnings:" in code
         assert "#   - Forced PEC: no noise model is available." in code
+
+    def test_normalized_frontend_warning_comments(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        features = replace(
+            shallow_features,
+            frontend="braket",
+            analysis_basis="cirq-normalized",
+        )
+
+        code = generate_code(_make_linear_recipe(), features)
+
+        assert "# Warnings:" in code
+        assert (
+            "#   - Recipe selected from Cirq-normalized features converted "
+            "from braket; counts may differ from native SDK counts."
+        ) in code
+        compile(code, "<emrg-normalized-warning>", "exec")
+
+    def test_normalized_cdr_warning_mentions_adapter(
+        self, shallow_features: CircuitFeatures
+    ) -> None:
+        features = replace(
+            shallow_features,
+            frontend="braket",
+            analysis_basis="cirq-normalized",
+        )
+        recipe = MitigationRecipe(
+            technique="cdr",
+            factory_name="",
+            scale_factors=(),
+            factory_kwargs={"num_training_circuits": 8},
+            scaling_method="",
+            rationale=("CDR selected.",),
+            noise_category="low",
+            estimated_overhead=8.0,
+        )
+
+        code = generate_code(recipe, features)
+
+        assert (
+            "#   - CDR simulator adapter may need frontend-specific configuration."
+        ) in code
+        compile(code, "<emrg-normalized-cdr-warning>", "exec")
 
     def test_parametric_shows_parameters(
         self, parametric_features: CircuitFeatures

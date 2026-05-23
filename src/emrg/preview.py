@@ -449,9 +449,9 @@ def run_preview(
             observable=observable,
             num_qubits=0,
             warning=(
-                f"Preview skipped: {active_frontend.value} inputs use "
-                "experimental normalized analysis, but preview is currently "
-                "supported only for qiskit and cirq circuits."
+                f"Preview for {active_frontend.value} inputs is not supported "
+                "yet; generate the recipe and connect the executor to your "
+                "backend."
             ),
         )
 

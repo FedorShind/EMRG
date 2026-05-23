@@ -185,7 +185,8 @@ def test_run_preview_skips_converted_optional_frontend(
 
     assert isinstance(result, PreviewResult)
     assert result.warning is not None
-    assert "Preview skipped" in result.warning
+    assert "Preview for braket inputs is not supported yet" in result.warning
+    assert "connect the executor to your backend" in result.warning
     assert "braket" in result.warning
     assert result.ideal_value is None
 
@@ -204,7 +205,8 @@ def test_generate_recipe_preview_skips_converted_optional_frontend(
 
     assert result.preview is not None
     assert result.preview.warning is not None
-    assert "Preview skipped" in result.preview.warning
+    assert "Preview for braket inputs is not supported yet" in result.preview.warning
+    assert "connect the executor to your backend" in result.preview.warning
     assert "braket" in result.preview.warning
 
 
