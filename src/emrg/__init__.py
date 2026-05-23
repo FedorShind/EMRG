@@ -118,10 +118,11 @@ def generate_recipe(
     Parameters
     ----------
     circuit:
-        A Qiskit ``QuantumCircuit`` or Cirq ``Circuit`` to mitigate.
+        A Qiskit ``QuantumCircuit``, Cirq ``Circuit``, or supported optional
+        frontend object to mitigate.
     frontend:
-        Optional explicit frontend: ``"qiskit"`` or ``"cirq"``. When omitted,
-        EMRG auto-detects Qiskit first, then Cirq.
+        Optional explicit frontend. When omitted, EMRG auto-detects Qiskit,
+        Cirq, then installed optional frontend objects.
     explain:
         If ``True``, include full rationale and inline comments in the
         generated code.

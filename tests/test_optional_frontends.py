@@ -6,8 +6,11 @@ import pytest
 
 import emrg.analyzer as analyzer_module
 import emrg.frontends as frontends
+from emrg import GeneratedRecipe, generate_recipe
 from emrg.analyzer import analyze_circuit
 from emrg.frontends import Frontend
+from emrg.heuristics import recommend
+from emrg.preview import PreviewResult, run_preview
 
 cirq = pytest.importorskip("cirq")
 
@@ -95,6 +98,57 @@ def test_analyze_circuit_routes_optional_frontend_through_cirq_analyzer(
     assert features.num_qubits == 2
     assert features.total_gate_count == 2
     assert features.multi_qubit_gate_count == 1
+
+
+def test_generate_recipe_accepts_converted_optional_frontend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_braket_type(monkeypatch)
+
+    def fake_normalize_to_cirq(_circuit: object, _frontend: Frontend):
+        return _cirq_bell()
+
+    monkeypatch.setattr(analyzer_module, "normalize_to_cirq", fake_normalize_to_cirq)
+
+    result = generate_recipe(FakeBraketCircuit())
+
+    assert isinstance(result, GeneratedRecipe)
+    assert result.features.num_qubits == 2
+    assert result.recipe.technique in {"zne", "pec", "cdr", "composite"}
+    compile(result.code, "<emrg-fake-braket-generated>", "exec")
+
+
+def test_run_preview_skips_converted_optional_frontend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_braket_type(monkeypatch)
+    recipe = recommend(analyze_circuit(_cirq_bell()))
+
+    result = run_preview(FakeBraketCircuit(), recipe)
+
+    assert isinstance(result, PreviewResult)
+    assert result.warning is not None
+    assert "Preview skipped" in result.warning
+    assert "braket" in result.warning
+    assert result.ideal_value is None
+
+
+def test_generate_recipe_preview_skips_converted_optional_frontend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_braket_type(monkeypatch)
+
+    def fake_normalize_to_cirq(_circuit: object, _frontend: Frontend):
+        return _cirq_bell()
+
+    monkeypatch.setattr(analyzer_module, "normalize_to_cirq", fake_normalize_to_cirq)
+
+    result = generate_recipe(FakeBraketCircuit(), preview=True)
+
+    assert result.preview is not None
+    assert result.preview.warning is not None
+    assert "Preview skipped" in result.preview.warning
+    assert "braket" in result.preview.warning
 
 
 def test_installed_braket_frontend_detects_and_analyzes() -> None:

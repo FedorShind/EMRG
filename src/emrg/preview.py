@@ -412,7 +412,8 @@ def run_preview(
     Parameters
     ----------
     circuit:
-        A Qiskit ``QuantumCircuit`` or Cirq ``Circuit``.
+        A Qiskit ``QuantumCircuit``, Cirq ``Circuit``, or supported optional
+        frontend object. Optional converted frontends return an explicit skip.
     recipe:
         The ``MitigationRecipe`` returned by ``recommend()``.
     noise_level:
@@ -428,14 +429,38 @@ def run_preview(
         If simulation is skipped or fails, value fields are ``None``
         and ``warning`` explains why.
     """
+    active_frontend = detect_frontend(circuit)
+    technique = recipe.technique.upper()
+    if active_frontend in (
+        Frontend.BRAKET,
+        Frontend.PENNYLANE,
+        Frontend.PYQUIL,
+        Frontend.QIBO,
+    ):
+        return PreviewResult(
+            ideal_value=None,
+            noisy_value=None,
+            mitigated_value=None,
+            noisy_error=None,
+            mitigated_error=None,
+            error_reduction=None,
+            technique=technique,
+            noise_level=noise_level,
+            observable=observable,
+            num_qubits=0,
+            warning=(
+                f"Preview skipped: {active_frontend.value} inputs use "
+                "experimental normalized analysis, but preview is currently "
+                "supported only for qiskit and cirq circuits."
+            ),
+        )
+
     _check_cirq_available()
 
-    active_frontend = detect_frontend(circuit)
     if active_frontend is Frontend.QISKIT:
         n_qubits = circuit.num_qubits
     else:
         n_qubits = len(circuit.all_qubits())
-    technique = recipe.technique.upper()
 
     # Guard: density matrix simulation cost is roughly
     # O(4^n * total_gates * max_scale_factor).  Cap by qubit count
