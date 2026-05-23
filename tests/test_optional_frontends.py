@@ -78,8 +78,32 @@ def test_normalize_to_cirq_wraps_conversion_failures(
 
     monkeypatch.setattr(mitiq.interface, "convert_to_mitiq", failing_convert_to_mitiq)
 
-    with pytest.raises(ValueError, match="braket.*custom gate is unsupported"):
+    with pytest.raises(
+        frontends.FrontendConversionError,
+        match="Could not normalize braket circuit through Mitiq.*custom gate",
+    ):
         frontends.normalize_to_cirq(FakeBraketCircuit(), Frontend.BRAKET)
+
+
+def test_normalize_to_cirq_does_not_double_wrap_conversion_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_braket_type(monkeypatch)
+    original = frontends.FrontendConversionError(
+        "Could not normalize braket circuit through Mitiq: custom gate"
+    )
+
+    def failing_convert_to_mitiq(_circuit: object):
+        raise original
+
+    import mitiq.interface
+
+    monkeypatch.setattr(mitiq.interface, "convert_to_mitiq", failing_convert_to_mitiq)
+
+    with pytest.raises(frontends.FrontendConversionError) as exc_info:
+        frontends.normalize_to_cirq(FakeBraketCircuit(), Frontend.BRAKET)
+
+    assert exc_info.value is original
 
 
 def test_normalize_to_cirq_rejects_non_cirq_converter_result(
@@ -235,7 +259,7 @@ def test_explicit_optional_frontend_rejects_wrong_object_when_sdk_installed(
 ) -> None:
     _install_fake_braket_type(monkeypatch)
 
-    with pytest.raises(TypeError, match="Expected a braket.circuits.Circuit"):
+    with pytest.raises(TypeError, match="frontend='braket'.*got object"):
         frontends.detect_frontend(object(), frontend=Frontend.BRAKET)
 
 

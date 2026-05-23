@@ -64,6 +64,22 @@ _OPTIONAL_FRONTEND_DISPLAY: dict[Frontend, str] = {
     Frontend.QIBO: "qibo.models.circuit.Circuit",
 }
 
+_OPTIONAL_FRONTEND_NAMES: dict[Frontend, str] = {
+    Frontend.BRAKET: "Braket",
+    Frontend.PENNYLANE: "PennyLane",
+    Frontend.PYQUIL: "PyQuil",
+    Frontend.QIBO: "Qibo",
+}
+
+_SUPPORTED_INPUTS = (
+    "Qiskit QuantumCircuit, Cirq Circuit, and optional converted Python "
+    "frontend objects"
+)
+
+
+def _supported_frontend_values() -> str:
+    return ", ".join(item.value for item in Frontend)
+
 
 def _coerce_frontend(frontend: str | Frontend) -> Frontend:
     """Return a Frontend enum value from a supported explicit frontend."""
@@ -74,9 +90,9 @@ def _coerce_frontend(frontend: str | Frontend) -> Frontend:
         try:
             return Frontend(value)
         except ValueError as exc:
-            supported = ", ".join(item.value for item in Frontend)
             raise ValueError(
-                f"Unsupported frontend {frontend!r}. Supported frontends: {supported}."
+                f"frontend={frontend!r} is not supported. "
+                f"Allowed values: {_supported_frontend_values()}."
             ) from exc
     raise TypeError(
         "frontend must be a supported frontend string, Frontend value, "
@@ -96,24 +112,27 @@ def _load_frontend_type(frontend: Frontend) -> type[Any]:
         module = importlib.import_module(module_name)
     except ImportError as exc:
         raise FrontendDependencyError(
-            f"Cannot validate frontend '{frontend.value}' because its optional "
-            f"dependency is not installed. Install it with: {install_hint}."
+            f"frontend='{frontend.value}' requires optional "
+            f"{_OPTIONAL_FRONTEND_NAMES[frontend]} support.\n"
+            f"Install with: {install_hint}"
         ) from exc
 
     try:
         frontend_type = getattr(module, attr_name)
     except AttributeError as exc:
         raise FrontendDependencyError(
-            f"Cannot validate frontend '{frontend.value}' because "
-            f"{module_name}.{attr_name} is unavailable. Install it with: "
-            f"{install_hint}."
+            f"frontend='{frontend.value}' requires optional "
+            f"{_OPTIONAL_FRONTEND_NAMES[frontend]} support, but "
+            f"{module_name}.{attr_name} is unavailable.\n"
+            f"Install with: {install_hint}"
         ) from exc
 
     if not isinstance(frontend_type, type):
         raise FrontendDependencyError(
-            f"Cannot validate frontend '{frontend.value}' because "
-            f"{module_name}.{attr_name} is not a type. Reinstall with: "
-            f"{install_hint}."
+            f"frontend='{frontend.value}' requires optional "
+            f"{_OPTIONAL_FRONTEND_NAMES[frontend]} support, but "
+            f"{module_name}.{attr_name} is not a type.\n"
+            f"Install with: {install_hint}"
         )
     return frontend_type
 
@@ -149,25 +168,27 @@ def _validate_frontend_object(circuit: object, frontend: Frontend) -> None:
     """Validate that *circuit* is compatible with *frontend*."""
     if frontend is Frontend.QISKIT and not _is_qiskit_circuit(circuit):
         raise TypeError(
-            f"Expected a qiskit.QuantumCircuit for frontend 'qiskit', "
+            "Requested frontend='qiskit' expects qiskit.QuantumCircuit; "
             f"got {type(circuit).__name__}."
         )
     if frontend is Frontend.CIRQ and not _is_cirq_circuit(circuit):
         raise TypeError(
-            f"Expected a cirq.Circuit for frontend 'cirq', "
+            "Requested frontend='cirq' expects cirq.Circuit; "
             f"got {type(circuit).__name__}."
         )
     if frontend in _OPTIONAL_FRONTEND_TYPES:
         if _is_qiskit_circuit(circuit) or _is_cirq_circuit(circuit):
             raise TypeError(
-                f"Expected a {_OPTIONAL_FRONTEND_DISPLAY[frontend]} for frontend "
-                f"'{frontend.value}', got {type(circuit).__name__}."
+                f"Requested frontend='{frontend.value}' expects "
+                f"{_OPTIONAL_FRONTEND_DISPLAY[frontend]}; "
+                f"got {type(circuit).__name__}."
             )
         frontend_type = _load_frontend_type(frontend)
         if not isinstance(circuit, frontend_type):
             raise TypeError(
-                f"Expected a {_OPTIONAL_FRONTEND_DISPLAY[frontend]} for frontend "
-                f"'{frontend.value}', got {type(circuit).__name__}."
+                f"Requested frontend='{frontend.value}' expects "
+                f"{_OPTIONAL_FRONTEND_DISPLAY[frontend]}; "
+                f"got {type(circuit).__name__}."
             )
 
 
@@ -184,8 +205,8 @@ def detect_frontend(
     if isinstance(circuit, str):
         raise TypeError(
             "Raw string circuit input is not supported in this phase. "
-            "Use the QASM CLI for QASM files. Expected a qiskit.QuantumCircuit "
-            "or supported circuit object."
+            "Use the QASM CLI for QASM files. EMRG currently supports "
+            f"{_SUPPORTED_INPUTS}."
         )
 
     if frontend is not None:
@@ -207,9 +228,8 @@ def detect_frontend(
             return candidate
 
     raise TypeError(
-        "Unsupported circuit type. Expected a qiskit.QuantumCircuit, cirq.Circuit, "
-        "or installed optional frontend circuit object, "
-        f"got {type(circuit).__name__}."
+        f"Unsupported input type {type(circuit).__name__}. "
+        f"EMRG currently supports {_SUPPORTED_INPUTS}."
     )
 
 
@@ -225,15 +245,16 @@ def normalize_to_cirq(circuit: object, frontend: str | Frontend):
         from mitiq.interface import convert_to_mitiq
 
         cirq_circuit, _input_type = convert_to_mitiq(circuit)
+    except FrontendConversionError:
+        raise
     except Exception as exc:
         raise FrontendConversionError(
-            f"Could not normalize {active_frontend.value} circuit to Cirq "
-            f"through Mitiq: {exc}"
+            f"Could not normalize {active_frontend.value} circuit through Mitiq: {exc}"
         ) from exc
 
     if not _is_cirq_circuit(cirq_circuit):
         raise FrontendConversionError(
-            f"Could not normalize {active_frontend.value} circuit to Cirq "
+            f"Could not normalize {active_frontend.value} circuit "
             f"through Mitiq: converter returned "
             f"{type(cirq_circuit).__name__}."
         )

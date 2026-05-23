@@ -58,17 +58,17 @@ def test_explicit_cirq_frontend_validates_matching_object(
 
 
 def test_explicit_wrong_frontend_for_qiskit_raises_clear_error() -> None:
-    with pytest.raises(TypeError, match="Expected a cirq.Circuit"):
+    with pytest.raises(TypeError, match="frontend='cirq'.*got QuantumCircuit"):
         detect_frontend(_qiskit_bell(), frontend="cirq")
 
 
 def test_explicit_wrong_frontend_for_cirq_raises_clear_error() -> None:
-    with pytest.raises(TypeError, match="Expected a qiskit.QuantumCircuit"):
+    with pytest.raises(TypeError, match="frontend='qiskit'.*got Circuit"):
         detect_frontend(_cirq_bell(), frontend="qiskit")
 
 
 def test_explicit_optional_frontend_for_qiskit_raises_mismatch() -> None:
-    with pytest.raises(TypeError, match="Expected a braket.circuits.Circuit"):
+    with pytest.raises(TypeError, match="frontend='braket'.*got QuantumCircuit"):
         detect_frontend(_qiskit_bell(), frontend="braket")
 
 
@@ -76,7 +76,13 @@ def test_explicit_optional_frontend_missing_dependency_has_install_hint() -> Non
     class UnknownCircuit:
         pass
 
-    with pytest.raises(ImportError, match=r'pip install "emrg\[braket\]"'):
+    with pytest.raises(
+        ImportError,
+        match=(
+            r"frontend='braket' requires optional Braket support[\s\S]*"
+            r"emrg\[braket\]"
+        ),
+    ):
         detect_frontend(UnknownCircuit(), frontend="braket")
 
 
@@ -102,12 +108,21 @@ def test_rejects_raw_string_circuit() -> None:
 
 
 def test_rejects_unsupported_object() -> None:
-    with pytest.raises(TypeError, match="Unsupported circuit type"):
+    with pytest.raises(
+        TypeError,
+        match=(
+            "Unsupported input type object.*Qiskit QuantumCircuit.*"
+            "Cirq Circuit.*optional converted Python frontend objects"
+        ),
+    ):
         detect_frontend(object())
 
 
 def test_rejects_invalid_frontend_name() -> None:
-    with pytest.raises(ValueError, match="Unsupported frontend"):
+    with pytest.raises(
+        ValueError,
+        match="frontend='openqasm' is not supported.*Allowed values:",
+    ):
         detect_frontend(_qiskit_bell(), frontend="openqasm")
 
 
