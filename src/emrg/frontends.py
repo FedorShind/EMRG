@@ -8,7 +8,9 @@ from typing import Any
 __all__ = [
     "Frontend",
     "FrontendDependencyError",
+    "FrontendConversionError",
     "detect_frontend",
+    "normalize_to_cirq",
 ]
 
 
@@ -25,6 +27,10 @@ class Frontend(StrEnum):
 
 class FrontendDependencyError(ImportError):
     """Raised when an explicit optional frontend cannot be validated."""
+
+
+class FrontendConversionError(ValueError):
+    """Raised when an input circuit cannot be normalized to Cirq."""
 
 
 _OPTIONAL_FRONTEND_TYPES: dict[Frontend, tuple[str, str, str]] = {
@@ -205,3 +211,30 @@ def detect_frontend(
         "or installed optional frontend circuit object, "
         f"got {type(circuit).__name__}."
     )
+
+
+def normalize_to_cirq(circuit: object, frontend: str | Frontend):
+    """Normalize a supported circuit object to Cirq through Mitiq."""
+    active_frontend = _coerce_frontend(frontend)
+    _validate_frontend_object(circuit, active_frontend)
+
+    if active_frontend is Frontend.CIRQ:
+        return circuit
+
+    try:
+        from mitiq.interface import convert_to_mitiq
+
+        cirq_circuit, _input_type = convert_to_mitiq(circuit)
+    except Exception as exc:
+        raise FrontendConversionError(
+            f"Could not normalize {active_frontend.value} circuit to Cirq "
+            f"through Mitiq: {exc}"
+        ) from exc
+
+    if not _is_cirq_circuit(cirq_circuit):
+        raise FrontendConversionError(
+            f"Could not normalize {active_frontend.value} circuit to Cirq "
+            f"through Mitiq: converter returned "
+            f"{type(cirq_circuit).__name__}."
+        )
+    return cirq_circuit

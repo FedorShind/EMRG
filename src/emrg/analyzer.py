@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from qiskit import QuantumCircuit
 
-from emrg.frontends import Frontend, detect_frontend
+from emrg.frontends import Frontend, detect_frontend, normalize_to_cirq
 
 __all__ = [
     "CircuitFeatures",
@@ -715,10 +715,11 @@ def analyze_circuit(
     Parameters
     ----------
     circuit:
-        A Qiskit ``QuantumCircuit`` or Cirq ``Circuit`` to analyze.
+        A Qiskit ``QuantumCircuit``, Cirq ``Circuit``, or supported optional
+        frontend object to analyze.
     frontend:
-        Optional explicit frontend: ``"qiskit"`` or ``"cirq"``. When omitted,
-        EMRG auto-detects Qiskit first, then Cirq.
+        Optional explicit frontend. When omitted, EMRG auto-detects Qiskit,
+        Cirq, then installed optional frontend objects.
     multi_qubit_error_rate:
         Proxy error rate for multi-qubit gates (default 0.01).
     single_qubit_error_rate:
@@ -763,6 +764,19 @@ def analyze_circuit(
     if active_frontend is Frontend.CIRQ:
         return _analyze_cirq_circuit(
             circuit,
+            multi_qubit_error_rate=multi_qubit_error_rate,
+            single_qubit_error_rate=single_qubit_error_rate,
+            noise_model_available=noise_model_available,
+        )
+    if active_frontend in (
+        Frontend.BRAKET,
+        Frontend.PENNYLANE,
+        Frontend.PYQUIL,
+        Frontend.QIBO,
+    ):
+        cirq_circuit = normalize_to_cirq(circuit, active_frontend)
+        return _analyze_cirq_circuit(
+            cirq_circuit,
             multi_qubit_error_rate=multi_qubit_error_rate,
             single_qubit_error_rate=single_qubit_error_rate,
             noise_model_available=noise_model_available,
