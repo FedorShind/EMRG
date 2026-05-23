@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import tomllib
+import types
 from pathlib import Path
 
 import pytest
@@ -80,6 +82,22 @@ def test_normalize_to_cirq_wraps_conversion_failures(
         frontends.normalize_to_cirq(FakeBraketCircuit(), Frontend.BRAKET)
 
 
+def test_normalize_to_cirq_rejects_non_cirq_converter_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_braket_type(monkeypatch)
+
+    def fake_convert_to_mitiq(_circuit: object):
+        return object(), "braket"
+
+    import mitiq.interface
+
+    monkeypatch.setattr(mitiq.interface, "convert_to_mitiq", fake_convert_to_mitiq)
+
+    with pytest.raises(ValueError, match="converter returned object"):
+        frontends.normalize_to_cirq(FakeBraketCircuit(), Frontend.BRAKET)
+
+
 def test_analyze_circuit_routes_optional_frontend_through_cirq_analyzer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -102,6 +120,15 @@ def test_analyze_circuit_routes_optional_frontend_through_cirq_analyzer(
     assert features.num_qubits == 2
     assert features.total_gate_count == 2
     assert features.multi_qubit_gate_count == 1
+
+
+def test_analyze_circuit_rejects_unreachable_frontend_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(analyzer_module, "detect_frontend", lambda *_args: "weird")
+
+    with pytest.raises(TypeError, match="Unsupported frontend"):
+        analyze_circuit(object())
 
 
 def test_generate_recipe_accepts_converted_optional_frontend(
@@ -170,6 +197,46 @@ def test_optional_frontend_extras_are_declared_without_base_dependencies() -> No
     assert extras["pyquil"] == ["mitiq[pyquil]>=0.48"]
     assert extras["qibo"] == ["mitiq[qibo]>=0.48"]
     assert extras["frontends"] == ["mitiq[braket,pennylane,pyquil,qibo]>=0.48"]
+
+
+def test_optional_loader_rejects_non_optional_frontend() -> None:
+    with pytest.raises(ValueError, match="not optional"):
+        frontends._load_frontend_type(Frontend.QISKIT)
+
+
+def test_optional_loader_missing_type_attribute_has_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda _module_name: types.SimpleNamespace(),
+    )
+
+    with pytest.raises(ImportError, match=r'pip install "emrg\[pennylane\]"'):
+        frontends._load_frontend_type(Frontend.PENNYLANE)
+
+
+def test_optional_loader_rejects_non_type_attribute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda _module_name: types.SimpleNamespace(Program=object()),
+    )
+
+    with pytest.raises(ImportError, match="is not a type"):
+        frontends._load_frontend_type(Frontend.PYQUIL)
+
+
+def test_explicit_optional_frontend_rejects_wrong_object_when_sdk_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_braket_type(monkeypatch)
+
+    with pytest.raises(TypeError, match="Expected a braket.circuits.Circuit"):
+        frontends.detect_frontend(object(), frontend=Frontend.BRAKET)
 
 
 def test_installed_braket_frontend_detects_and_analyzes() -> None:
