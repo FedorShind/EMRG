@@ -141,6 +141,8 @@ def test_analyze_circuit_routes_optional_frontend_through_cirq_analyzer(
 
     features = analyze_circuit(FakeBraketCircuit())
 
+    assert features.frontend == "braket"
+    assert features.analysis_basis == "cirq-normalized"
     assert features.num_qubits == 2
     assert features.total_gate_count == 2
     assert features.multi_qubit_gate_count == 1

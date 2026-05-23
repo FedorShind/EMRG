@@ -7,6 +7,7 @@ from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter
 
 from emrg.analyzer import (
+    CircuitFeatures,
     analyze_circuit,
 )
 
@@ -69,7 +70,9 @@ class TestValidation:
     """Input validation tests."""
 
     def test_rejects_non_circuit(self) -> None:
-        with pytest.raises(TypeError, match="Expected a qiskit.QuantumCircuit"):
+        with pytest.raises(
+            TypeError, match="Raw string circuit input is not supported"
+        ):
             analyze_circuit("not a circuit")  # type: ignore[arg-type]
 
     def test_rejects_empty_circuit(self) -> None:
@@ -246,6 +249,12 @@ class TestCircuitFeaturesDataclass:
         r = repr(f)
         assert "num_qubits=2" in r
         assert "noise_category=" in r
+
+    def test_direct_construction_defaults_to_qiskit_metadata(self) -> None:
+        features = CircuitFeatures(num_qubits=1, depth=1)
+
+        assert features.frontend == "qiskit"
+        assert features.analysis_basis == "qiskit"
 
 
 # ---------------------------------------------------------------------------

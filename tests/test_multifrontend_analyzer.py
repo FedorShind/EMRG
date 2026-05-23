@@ -71,6 +71,8 @@ class TestQiskitParity:
     def test_bell_feature_values_are_unchanged(self) -> None:
         features = analyze_circuit(_qiskit_bell())
 
+        assert features.frontend == "qiskit"
+        assert features.analysis_basis == "qiskit"
         _assert_features(
             features,
             num_qubits=2,
@@ -208,6 +210,8 @@ class TestCirqAnalysis:
     def test_measured_bell_circuit(self) -> None:
         features = analyze_circuit(_cirq_bell())
 
+        assert features.frontend == "cirq"
+        assert features.analysis_basis == "cirq"
         _assert_features(
             features,
             num_qubits=2,
@@ -344,5 +348,5 @@ class TestCirqAnalysis:
             analyze_circuit("OPENQASM 2.0;")
 
     def test_explicit_wrong_frontend_raises_clear_error(self) -> None:
-        with pytest.raises(TypeError, match="Expected a cirq.Circuit"):
+        with pytest.raises(TypeError, match="frontend='cirq'.*got QuantumCircuit"):
             analyze_circuit(_qiskit_bell(), frontend="cirq")

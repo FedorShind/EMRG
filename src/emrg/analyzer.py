@@ -212,6 +212,10 @@ class CircuitFeatures:
         non_clifford_fraction: Fraction of gates that are non-Clifford
             (``non_clifford_count / total_gate_count``).  0.0 means all
             Clifford, 1.0 means all non-Clifford.
+        frontend: Original input frontend detected by EMRG.
+        analysis_basis: Feature basis used for analysis. Converted optional
+            frontend objects use ``"cirq-normalized"`` because EMRG analyzes
+            the Cirq circuit produced by Mitiq conversion.
     """
 
     num_qubits: int
@@ -229,6 +233,8 @@ class CircuitFeatures:
     layer_heterogeneity: float = 0.0
     non_clifford_count: int = 0
     non_clifford_fraction: float = 0.0
+    frontend: str = "qiskit"
+    analysis_basis: str = "qiskit"
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +601,8 @@ def _analyze_qiskit_circuit(
     multi_qubit_error_rate: float = DEFAULT_MULTI_QUBIT_ERROR_RATE,
     single_qubit_error_rate: float = DEFAULT_SINGLE_QUBIT_ERROR_RATE,
     noise_model_available: bool = False,
+    frontend: str = "qiskit",
+    analysis_basis: str = "qiskit",
 ) -> CircuitFeatures:
     """Analyze a Qiskit ``QuantumCircuit`` with the original native path."""
     warn_msgs = _validate_qiskit_circuit(qc)
@@ -644,6 +652,8 @@ def _analyze_qiskit_circuit(
         layer_heterogeneity=round(layer_het, 4),
         non_clifford_count=non_clifford,
         non_clifford_fraction=round(nc_fraction, 6),
+        frontend=frontend,
+        analysis_basis=analysis_basis,
     )
 
 
@@ -653,6 +663,8 @@ def _analyze_cirq_circuit(
     multi_qubit_error_rate: float = DEFAULT_MULTI_QUBIT_ERROR_RATE,
     single_qubit_error_rate: float = DEFAULT_SINGLE_QUBIT_ERROR_RATE,
     noise_model_available: bool = False,
+    frontend: str = "cirq",
+    analysis_basis: str = "cirq",
 ) -> CircuitFeatures:
     """Analyze a Cirq ``Circuit`` into EMRG's shared feature model."""
     operations = list(circuit.all_operations())
@@ -699,6 +711,8 @@ def _analyze_cirq_circuit(
         layer_heterogeneity=round(layer_het, 4),
         non_clifford_count=non_clifford,
         non_clifford_fraction=round(nc_fraction, 6),
+        frontend=frontend,
+        analysis_basis=analysis_basis,
     )
 
 
@@ -780,5 +794,7 @@ def analyze_circuit(
             multi_qubit_error_rate=multi_qubit_error_rate,
             single_qubit_error_rate=single_qubit_error_rate,
             noise_model_available=noise_model_available,
+            frontend=active_frontend.value,
+            analysis_basis="cirq-normalized",
         )
     raise TypeError(f"Unsupported frontend: {active_frontend!r}.")

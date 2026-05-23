@@ -191,6 +191,8 @@ class TestAnalyze:
             "non_clifford_fraction",
         }
         assert set(data.keys()) == expected_keys
+        assert "frontend" not in data
+        assert "analysis_basis" not in data
         assert "warnings" not in data
 
     def test_analyze_json_types(self, runner: CliRunner) -> None:
