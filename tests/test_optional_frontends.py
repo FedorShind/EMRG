@@ -220,11 +220,15 @@ def test_optional_frontend_extras_are_declared_without_base_dependencies() -> No
         for dependency in dependencies
         for package in ("braket", "pennylane", "pyquil", "qibo")
     )
-    assert extras["braket"] == ["mitiq[braket]>=0.48"]
-    assert extras["pennylane"] == ["mitiq[pennylane]>=0.48"]
-    assert extras["pyquil"] == ["mitiq[pyquil]>=0.48"]
-    assert extras["qibo"] == ["mitiq[qibo]>=0.48"]
-    assert extras["frontends"] == ["mitiq[braket,pennylane,pyquil,qibo]>=0.48"]
+    assert extras["braket"] == ["mitiq[braket]>=0.48", "ply"]
+    assert extras["pennylane"] == ["mitiq[pennylane]>=0.48", "ply"]
+    assert extras["pyquil"] == ["mitiq[pyquil]>=0.48", "ply"]
+    assert extras["qibo"] == ["mitiq[qibo]>=0.48", "ply", "qiskit-aer"]
+    assert extras["frontends"] == [
+        "mitiq[braket,pennylane,pyquil,qibo]>=0.48",
+        "ply",
+        "qiskit-aer",
+    ]
 
 
 def test_optional_loader_rejects_non_optional_frontend() -> None:

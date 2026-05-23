@@ -59,18 +59,25 @@ qasm3 = [
 ]
 braket = [
     "mitiq[braket]>=0.48",
+    "ply",
 ]
 pennylane = [
     "mitiq[pennylane]>=0.48",
+    "ply",
 ]
 pyquil = [
     "mitiq[pyquil]>=0.48",
+    "ply",
 ]
 qibo = [
     "mitiq[qibo]>=0.48",
+    "ply",
+    "qiskit-aer",
 ]
 frontends = [
     "mitiq[braket,pennylane,pyquil,qibo]>=0.48",
+    "ply",
+    "qiskit-aer",
 ]
 
 [project.scripts]
