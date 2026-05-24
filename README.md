@@ -1,38 +1,51 @@
-# EMRG
-
-[![CI](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml/badge.svg)](https://github.com/FedorShind/EMRG/actions/workflows/ci.yml)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
+<div align="center">
+  <img src="docs/banner-emrg.jpg" alt="EMRG" width="390">
+  <p><strong>Error Mitigation Recipe Generator</strong></p>
+  <p>
+    <a href="https://github.com/FedorShind/EMRG/tree/main/docs">Docs</a> &middot;
+    <a href="https://mitiq.readthedocs.io/">Mitiq</a> &middot;
+    <a href="https://pypi.org/project/emrg/">PyPI</a>
+  </p>
+  <p>
+    <a href="https://github.com/FedorShind/EMRG/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/FedorShind/EMRG/actions/workflows/ci.yml/badge.svg"></a>
+    <a href="https://pypi.org/project/emrg/"><img alt="PyPI" src="https://img.shields.io/pypi/v/emrg.svg"></a>
+    <a href="https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg"></a>
+  </p>
+</div>
 
 **Error Mitigation Recipe Generator** for [Mitiq](https://mitiq.readthedocs.io/).
 
-EMRG reads a Qiskit circuit, chooses right mitigation recipe, and renders the
-Mitiq code to run it. The problem of choosing the recipe is what EMRG helps with.
-EMRG is the small deterministic layer in between.
+EMRG reads a quantum circuit, chooses the right mitigation recipe, and renders
+the Mitiq code to run it. Qiskit and QASM are native, Cirq is supported
+directly, and Braket, PennyLane, PyQuil, and Qibo can be used through
+Mitiq/Cirq normalization.
 
 ## The idea
 
 NISQ error mitigation has too many knobs. ZNE needs scale factors and a folding
 method. PEC needs a noise model and a sampling budget. CDR needs enough
 non-Clifford structure to train against. Composite recipes can help, but only
-when their cost is still sane.
+when their cost is still sane. It is a problem that I myself faced.
 
-EMRG *is a recipe layer*. It is not a new mitigation primitive.
+EMRG *is a recipe layer*.
 
 It inspects a circuit, picks from ZNE, PEC, CDR, or composite ZNE-over-PEC, then
-outputs Mitiq-native Python with the reason for the choice. It is intentionally
+outputs Mitiq-native Python with the reason for the choice. It is intentionally made
 boring: inspect, choose, render.
 
 ## How it works
 
 ```text
-Qiskit circuit or QASM
+Qiskit / QASM / Cirq / converted frontend
         |
         v
 analyze features -> choose policy recipe -> render Mitiq code -> optional preview
 ```
 
 1. Analyze circuit features: depth, gate mix, noise proxy, PEC overhead,
-   layer heterogeneity, and non-Clifford fraction.
+   layer heterogeneity, and non-Clifford fraction. Qiskit and QASM use the
+   native Qiskit path, Cirq is analyzed directly, and optional frontends are
+   converted through Mitiq/Cirq first.
 2. Pick a recipe from the active policy.
 3. Generate Mitiq code with imports, parameters, and rationale.
 4. Optionally preview the recipe with a local simulator.
@@ -66,11 +79,54 @@ print(result.code)
 print(result.rationale)
 ```
 
+Cirq:
 
-Or try it without installing: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
+```python
+import cirq
+from emrg import generate_recipe
+
+q0, q1 = cirq.LineQubit.range(2)
+circuit = cirq.Circuit(cirq.H(q0), cirq.CNOT(q0, q1), cirq.measure(q0, q1))
+
+result = generate_recipe(circuit)
+print(result.code)
+```
+
+Or try it without installing:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/FedorShind/EMRG/blob/main/docs/tutorials/vqe_h2_mitigation.ipynb)
 
 The generated script contains a backend executor adapter. You still connect
 that adapter to your simulator or hardware backend.
+
+## Inputs
+
+| Input | Status | Notes |
+|---|---|---|
+| Qiskit `QuantumCircuit` | native | Main Python API path |
+| QASM files/stdin | native | CLI path, loaded through Qiskit |
+| Cirq `Circuit` | direct | Python API |
+| Braket `Circuit` | experimental normalized | converted through Mitiq/Cirq |
+| PennyLane `QuantumTape` | experimental normalized | QNodes are not the target yet |
+| PyQuil `Program` | experimental normalized | converted through Mitiq/Cirq |
+| Qibo `Circuit` | experimental normalized | converted through Mitiq/Cirq |
+
+For normalized frontends, EMRG analyzes the Mitiq/Cirq-normalized circuit.
+Depth, gate counts, and non-Clifford counts may differ from native SDK
+semantics. The CLI is still QASM-only; other frontends are Python API inputs.
+
+Optional installs:
+
+```bash
+pip install "emrg[preview]"
+pip install "emrg[config]"
+pip install "emrg[braket]"
+pip install "emrg[pennylane]"
+pip install "emrg[pyquil]"
+pip install "emrg[qibo]"
+pip install "emrg[frontends]"
+```
+
+`emrg[frontends]` installs the optional converted frontend stack in one shot.
 
 ### CLI Usage
 ```
@@ -114,7 +170,7 @@ emrg analyze circuit.qasm --json
 
 ## Policies
 
-EMRG ships with a built-in default policy. Policies tune thresholds, overhead
+EMRG has a built-in default policy. Policies tune thresholds, overhead
 budgets, and Mitiq factory/scaling choices. Policies are data, not code: they
 do not execute Python, import modules, or define arbitrary logic.
 
@@ -137,7 +193,7 @@ in `src/emrg/policy.py`.
 
 ## Preview mode
 
-Preview mode runs a neat local simulator check:
+Preview mode runs a local simulator check for Qiskit and Cirq inputs:
 
 ```bash
 pip install "emrg[preview]"
@@ -146,11 +202,13 @@ emrg generate docs/examples/bell_state.qasm --preview
 
 It uses density-matrix simulation, so size matters. Circuits above the preview
 budget are skipped with a plain warning. PEC, CDR, and composite previews can
-vary because they include stochastic pieces.
+vary because they include stochastic pieces. For Braket, PennyLane, PyQuil, and
+Qibo inputs, recipe generation works but preview is intentionally skipped for
+now.
 
 ## Benchmarks
 
-v0.5.1 includes a reproducible local benchmark harness. It compares policy
+v0.6.0 includes a reproducible local benchmark harness. It compares policy
 choices under simulator and noise-model setups. This is useful for regression
 testing and local policy calibration. It is not a hardware performance claim.
 
@@ -164,8 +222,7 @@ Compact local calibration snapshot:
 Benchmark numbers are local simulator results. Run
 `benchmarks/run_benchmark.py` to write machine-readable JSON under
 `benchmarks/results/`, then score it with `benchmarks/score_results.py`.
-Skipped simulations are recorded explicitly, not counted as passes.
-Do not commit generated benchmark JSON or external QASM datasets.
+Skipped simulations are recorded, not counted as passes.
 
 Older detailed benchmark tables live in
 [`benchmarks/HISTORICAL_RESULTS.md`](benchmarks/HISTORICAL_RESULTS.md).
@@ -174,22 +231,25 @@ Older detailed benchmark tables live in
 
 ```
 EMRG/
-├── src/emrg/
-│   ├── __init__.py      # Public API and generate_recipe()
-│   ├── _version.py      # Single source of truth for version
-│   ├── analyzer.py      # Circuit feature extraction
-│   ├── heuristics.py    # Rule-based decision engine
-│   ├── policy.py        # JSON/YAML policy model and validation
-│   ├── codegen.py       # Template-based code generation
-│   ├── preview.py       # Simulation preview engine
-│   ├── cli.py           # Click CLI interface
-│   └── py.typed         # PEP 561 type marker
-├── tests/               # 486 tests, coverage checked in CI/local validation
-├── docs/
-│   ├── examples/        # Example circuits (Python + QASM)
-│   └── tutorials/       # Jupyter notebooks (VQE, QAOA)
-├── benchmarks/          # Automated benchmark suite plus historical data
-└── pyproject.toml       # Package configuration
+|-- src/emrg/
+|   |-- __init__.py      # Public API and generate_recipe()
+|   |-- _version.py      # Single source of truth for version
+|   |-- analyzer.py      # Circuit feature extraction
+|   |-- frontends.py     # Frontend detection and normalization
+|   |-- heuristics.py    # Rule-based decision engine
+|   |-- policy.py        # JSON/YAML policy model and validation
+|   |-- codegen.py       # Template-based code generation
+|   |-- preview.py       # Simulation preview engine
+|   |-- cli.py           # Click CLI interface
+|   `-- py.typed         # PEP 561 type marker
+|-- tests/               # Unit, integration, frontend, benchmark, and docs checks
+|-- docs/
+|   |-- examples/        # Example circuits (Python + QASM)
+|   |-- tutorials/       # Jupyter notebooks (VQE, QAOA)
+|   `-- banner-emrg.jpg  # Cool README banner
+|-- benchmarks/          # Automated benchmark suite plus historical data
+|-- tools/               # Maintainer checks for optional frontend extras
+`-- pyproject.toml       # Package configuration
 ```
 
 ## Design choices
@@ -197,16 +257,20 @@ EMRG/
 - Deterministic by default.
 - Policy files, not arbitrary code.
 - Mitiq-native output instead of a wrapper runtime.
-- Qiskit input today.
+- Qiskit/QASM native, Cirq direct, optional frontends normalized through Mitiq/Cirq.
 - Benchmark harness is local and reproducible.
 - Conservative about hardware claims.
 
 ## Limitations
 
-- Qiskit input is the main path for now.
+- Converted frontend analysis uses Cirq-normalized features, so counts may
+  differ from native SDK semantics.
+- CLI input is QASM-only.
 - Generated code needs a backend executor.
-- Preview is simulation, not hardware validation of course.
+- Preview is Qiskit/Cirq simulation, not hardware validation.
 - PEC, CDR, and composite recipes can have stochastic or backend-specific costs.
+- Native analyzers for optional frontends are future work only if conversion
+  proves insufficient.
 
 ## Roadmap
 
@@ -229,14 +293,15 @@ EMRG/
 - [x] Layerwise Richardson integration
 - [x] `--preview` mode (noisy simulation + before/after comparison)
 - [x] Expanded tutorials (VQE, QAOA)
-- [x] 486 tests, coverage checked in CI/local validation, zero lint warnings
+- [x] Unit, integration, preview, policy, and docs checks in CI/local validation
 - [x] Clifford Data Regression (CDR) support
 - [x] Composite recipes -- combine ZNE + PEC for circuits that benefit from both
 - [x] Configurable heuristics via YAML/JSON
 
 ### Phase 3 -- Multi-framework support (in progress)
 
-- [ ] Cirq, PennyLane, and Amazon Braket input support
+- [x] Cirq Python API input support
+- [x] Experimental normalized Braket, PennyLane QuantumTape, PyQuil Program, and Qibo Circuit input support
 - [ ] Noise model import from Qiskit Aer / real device calibration data
 - [ ] Jupyter widget for interactive recipe exploration
 - [ ] Web/Colab interface
@@ -262,7 +327,8 @@ EMRG/
 * **Qiskit** >= 1.0 -- circuit representation and introspection
 * **Mitiq** >= 0.48 -- error mitigation primitives
 * **Click** >= 8.0 -- CLI framework
-* **Cirq** >= 1.0 -- simulation backend (optional, for preview and CDR)
+* **Cirq** >= 1.0 -- direct Python input and simulation preview backend
+* **Braket, PennyLane, PyQuil, Qibo** -- optional converted frontend extras
 
 ## Contributing
 
